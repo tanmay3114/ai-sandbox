@@ -18,7 +18,6 @@ next execution.
 ## Prerequisites
 
 - Python 3.12+
-- PostgreSQL accessible from your machine
 - Docker Engine or Docker Desktop running, with permission to use its socket
 - The trusted runtime image available locally (Docker will pull
   `python:3.12-slim` when needed)
@@ -34,10 +33,14 @@ pip install -e ".[dev]"
 cp .env.example .env
 ```
 
-Edit `.env` with your own PostgreSQL URL. The application requires
-`SANDBOX_DATABASE_URL`; it deliberately has no credential-bearing fallback.
-For example, replace every placeholder in the copied template with local
-values. Do not commit `.env`.
+Edit `.env` and replace `change_me` with your own local PostgreSQL password.
+Do not commit `.env`.
+
+Start the local PostgreSQL database:
+
+```bash
+docker compose up -d db
+```
 
 Apply the schema migration and start the API:
 
