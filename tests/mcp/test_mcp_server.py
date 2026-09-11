@@ -406,6 +406,22 @@ async def test_mcp_tool_service_failures_returned_safely(mcp_server, mock_lifecy
 
 
 @pytest.mark.asyncio
+async def test_mcp_unexpected_error_sanitizes_secrets(mcp_server, mock_lifecycle_service):
+    """Verify unexpected exception details and secrets do not leak to MCP callers."""
+    secret = "INTERNAL_SECRET_SHOULD_NOT_LEAK"
+    mock_lifecycle_service.get_sandbox.side_effect = RuntimeError(f"Database crash with {secret}")
+
+    res = await mcp_server.call_tool("get_sandbox", {"sandbox_id": str(uuid.uuid4())})
+    data = _parse_tool_result(res)
+
+    assert data["error"] == "InternalToolError"
+    assert data["message"] == "An unexpected error occurred while executing the tool."
+    assert data["details"] == {}
+    assert secret not in json.dumps(data)
+    assert secret not in res.content[0].text
+
+
+@pytest.mark.asyncio
 async def test_mcp_unknown_inputs_cannot_bypass_validation(mcp_server, mock_lifecycle_service):
     """13. Injected arbitrary arguments cannot bypass security validation."""
     target_id = str(uuid.uuid4())

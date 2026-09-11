@@ -55,7 +55,7 @@ def _format_mcp_error(exc: Exception) -> dict[str, Any]:
     return AgentToolError(
         error="InternalToolError",
         message="An unexpected error occurred while executing the tool.",
-        details={"detail": str(exc)},
+        details={},
     ).model_dump(mode="json")
 
 
