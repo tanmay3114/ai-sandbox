@@ -11,8 +11,12 @@ from fastapi.responses import JSONResponse
 from app.api.health import router as health_router
 from app.api.v1.router import api_v1_router
 from app.core.exceptions import (
+    AgentMaxIterationsError,
+    AgentTimeoutError,
     ConcurrencyLimitError,
     DockerEngineError,
+    ExecutionNotFoundError,
+    LLMProviderError,
     SandboxNotFoundError,
     SandboxPlatformError,
 )
@@ -117,6 +121,24 @@ async def sandbox_not_found_handler(
     )
 
 
+@app.exception_handler(ExecutionNotFoundError)
+async def execution_not_found_handler(
+    request: Request,
+    exc: ExecutionNotFoundError,
+) -> JSONResponse:
+    """Handle 404 for missing execution resources."""
+    logger.info(f"ExecutionNotFoundError: {exc.message}")
+    return JSONResponse(
+        status_code=status.HTTP_404_NOT_FOUND,
+        content={
+            "error": "ExecutionNotFoundError",
+            "message": exc.message,
+            "details": exc.details,
+        },
+    )
+
+
+
 @app.exception_handler(InvalidStateTransitionError)
 async def invalid_transition_handler(
     request: Request,
@@ -130,6 +152,57 @@ async def invalid_transition_handler(
             "error": "InvalidStateTransitionError",
             "message": exc.message,
             "details": exc.details,
+        },
+    )
+
+
+@app.exception_handler(AgentTimeoutError)
+async def agent_timeout_handler(
+    request: Request,
+    exc: AgentTimeoutError,
+) -> JSONResponse:
+    """Handle agent deadline expiration."""
+    logger.warning(f"Agent execution timed out: {exc.message}")
+    return JSONResponse(
+        status_code=status.HTTP_504_GATEWAY_TIMEOUT,
+        content={
+            "error": "AgentTimeoutError",
+            "message": exc.message,
+            "details": exc.details,
+        },
+    )
+
+
+@app.exception_handler(AgentMaxIterationsError)
+async def agent_max_iterations_handler(
+    request: Request,
+    exc: AgentMaxIterationsError,
+) -> JSONResponse:
+    """Handle agent loop iteration limit exhaustion."""
+    logger.warning(f"Agent max iterations reached: {exc.message}")
+    return JSONResponse(
+        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        content={
+            "error": "AgentMaxIterationsError",
+            "message": exc.message,
+            "details": exc.details,
+        },
+    )
+
+
+@app.exception_handler(LLMProviderError)
+async def llm_provider_handler(
+    request: Request,
+    exc: LLMProviderError,
+) -> JSONResponse:
+    """Handle LLM provider communication failure without leaking secrets."""
+    logger.error(f"LLMProviderError on {request.url.path}: {exc.message}")
+    return JSONResponse(
+        status_code=status.HTTP_502_BAD_GATEWAY,
+        content={
+            "error": "LLMProviderError",
+            "message": "AI model provider communication failed.",
+            "details": {},
         },
     )
 

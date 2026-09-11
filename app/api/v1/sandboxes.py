@@ -143,6 +143,29 @@ async def execute_in_sandbox(
     )
 
 
+@router.get(
+    "/{sandbox_id}/executions/{execution_id}",
+    response_model=JobExecutionResponse,
+    status_code=status.HTTP_200_OK,
+    responses={
+        200: {"model": JobExecutionResponse, "description": "Execution details retrieved"},
+        404: {"model": ErrorResponse, "description": "Sandbox or Execution ID not found"},
+    },
+    summary="Get Execution Job Result",
+    description=(
+        "Retrieve status, logs, exit code, and timestamps for an execution job within a sandbox."
+    ),
+)
+async def get_execution_result(
+    sandbox_id: uuid.UUID,
+    execution_id: uuid.UUID,
+    service: SandboxLifecycleService = Depends(get_sandbox_lifecycle_service),
+) -> JobExecutionResponse:
+    """Fetch results and metadata for a specific execution job."""
+    return service.get_execution(sandbox_id=sandbox_id, execution_id=execution_id)
+
+
+
 # ===================================================================
 # Backward Compatibility Endpoint: POST /api/v1/sandboxes/execute
 # ===================================================================

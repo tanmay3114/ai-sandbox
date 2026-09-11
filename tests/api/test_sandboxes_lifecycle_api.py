@@ -126,3 +126,56 @@ def test_api_execute_on_unknown_sandbox_returns_404(client: TestClient):
     response = client.post(f"/api/v1/sandboxes/{random_id}/execute", json={"code": "print('fail')"})
     assert response.status_code == 404
     assert response.json()["error"] == "SandboxNotFoundError"
+
+
+def test_api_get_execution_result_success(client: TestClient):
+    """Test GET /api/v1/sandboxes/{sandbox_id}/executions/{execution_id}."""
+    create_resp = client.post("/api/v1/sandboxes", json={"runtime": "python", "ttl_seconds": 180})
+    sandbox_id = create_resp.json()["sandbox_id"]
+
+    exec_resp = client.post(
+        f"/api/v1/sandboxes/{sandbox_id}/execute",
+        json={"code": "print('API job lookup')"},
+    )
+    assert exec_resp.status_code == 200
+    execution_id = exec_resp.json()["execution_id"]
+
+    get_exec_resp = client.get(f"/api/v1/sandboxes/{sandbox_id}/executions/{execution_id}")
+    assert get_exec_resp.status_code == 200
+    data = get_exec_resp.json()
+    assert data["execution_id"] == execution_id
+    assert data["sandbox_id"] == sandbox_id
+    assert data["status"] == "completed"
+    assert "API job lookup" in data["stdout"]
+    assert data["exit_code"] == 0
+
+
+def test_api_get_execution_result_not_found(client: TestClient):
+    """Test GET on unknown execution ID returns 404 ExecutionNotFoundError."""
+    create_resp = client.post("/api/v1/sandboxes", json={"runtime": "python", "ttl_seconds": 180})
+    sandbox_id = create_resp.json()["sandbox_id"]
+    random_exec_id = uuid.uuid4()
+
+    response = client.get(f"/api/v1/sandboxes/{sandbox_id}/executions/{random_exec_id}")
+    assert response.status_code == 404
+    assert response.json()["error"] == "ExecutionNotFoundError"
+
+
+def test_api_get_execution_result_mismatched_sandbox(client: TestClient):
+    """Test GET execution under a different sandbox ID returns 404 ExecutionNotFoundError."""
+    s1_resp = client.post("/api/v1/sandboxes", json={"runtime": "python", "ttl_seconds": 180})
+    sandbox1_id = s1_resp.json()["sandbox_id"]
+    s2_resp = client.post("/api/v1/sandboxes", json={"runtime": "python", "ttl_seconds": 180})
+    sandbox2_id = s2_resp.json()["sandbox_id"]
+
+    exec_resp = client.post(
+        f"/api/v1/sandboxes/{sandbox1_id}/execute",
+        json={"code": "print('s1')"},
+    )
+    execution_id = exec_resp.json()["execution_id"]
+
+    # Attempt fetching sandbox 1's execution under sandbox 2
+    response = client.get(f"/api/v1/sandboxes/{sandbox2_id}/executions/{execution_id}")
+    assert response.status_code == 404
+    assert response.json()["error"] == "ExecutionNotFoundError"
+

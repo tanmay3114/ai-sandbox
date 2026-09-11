@@ -6,6 +6,8 @@ import docker
 from fastapi import Depends
 from sqlalchemy.orm import Session
 
+from app.agent.agent import SandboxAgent
+from app.agent.llm import LLMProvider, get_llm_provider
 from app.core.config import SandboxSettings, settings
 from app.db.session import get_db
 from app.sandbox.docker_client import get_docker_client
@@ -44,3 +46,20 @@ def get_sandbox_lifecycle_service(
 ) -> SandboxLifecycleService:
     """Provide SandboxLifecycleService instance backed by PostgreSQL session."""
     return SandboxLifecycleService(db=db, config=config, engine=engine)
+
+
+def get_llm_provider_dependency(
+    config: SandboxSettings = Depends(get_settings),
+) -> LLMProvider:
+    """Provide configured LLMProvider instance."""
+    return get_llm_provider(config=config)
+
+
+def get_sandbox_agent(
+    llm: LLMProvider = Depends(get_llm_provider_dependency),
+    service: SandboxLifecycleService = Depends(get_sandbox_lifecycle_service),
+    config: SandboxSettings = Depends(get_settings),
+) -> SandboxAgent:
+    """Provide SandboxAgent instance configured with LLM provider and sandbox service."""
+    return SandboxAgent(llm_provider=llm, service=service, config=config)
+

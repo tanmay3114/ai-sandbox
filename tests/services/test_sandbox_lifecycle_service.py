@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 
 from app.core.exceptions import (
     DockerEngineError,
+    ExecutionNotFoundError,
     SandboxDestroyedError,
     SandboxExpiredError,
     SandboxNotFoundError,
@@ -169,3 +170,46 @@ async def test_service_persists_engine_failure_as_failed_job(db_session: Session
     assert jobs[0].status == "failed"
     assert jobs[0].completed_at is not None
     assert jobs[0].error_message == "Execution infrastructure failure"
+
+
+@pytest.mark.asyncio
+async def test_service_get_execution_success(db_session: Session, engine: EphemeralSandboxEngine):
+    """Test retrieving a historical execution record by sandbox_id and execution_id."""
+    service = SandboxLifecycleService(db=db_session, engine=engine)
+    sandbox = service.create_sandbox(runtime="python", ttl_seconds=180)
+
+    exec_res = await service.execute_code(sandbox.id, "print('history check')")
+
+    fetched_exec = service.get_execution(sandbox.id, exec_res.execution_id)
+    assert fetched_exec.execution_id == exec_res.execution_id
+    assert fetched_exec.sandbox_id == sandbox.id
+    assert fetched_exec.status == "completed"
+    assert "history check" in fetched_exec.stdout
+    assert fetched_exec.exit_code == 0
+    assert fetched_exec.completed_at is not None
+
+
+def test_service_get_execution_not_found(db_session: Session, engine: EphemeralSandboxEngine):
+    """Test retrieving a non-existent execution ID raises ExecutionNotFoundError."""
+    service = SandboxLifecycleService(db=db_session, engine=engine)
+    sandbox = service.create_sandbox(runtime="python", ttl_seconds=180)
+    random_exec_id = uuid.uuid4()
+
+    with pytest.raises(ExecutionNotFoundError):
+        service.get_execution(sandbox.id, random_exec_id)
+
+
+@pytest.mark.asyncio
+async def test_service_get_execution_mismatch_sandbox(
+    db_session: Session, engine: EphemeralSandboxEngine
+):
+    """Test retrieving an execution belonging to another sandbox raises ExecutionNotFoundError."""
+    service = SandboxLifecycleService(db=db_session, engine=engine)
+    sandbox1 = service.create_sandbox(runtime="python", ttl_seconds=180)
+    sandbox2 = service.create_sandbox(runtime="python", ttl_seconds=180)
+
+    exec1 = await service.execute_code(sandbox1.id, "print('sandbox 1')")
+
+    with pytest.raises(ExecutionNotFoundError):
+        service.get_execution(sandbox2.id, exec1.execution_id)
+
