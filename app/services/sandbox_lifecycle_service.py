@@ -9,6 +9,7 @@ from starlette.concurrency import run_in_threadpool
 
 from app.core.config import SandboxSettings, settings
 from app.core.exceptions import (
+    ExecutionNotFoundError,
     SandboxDestroyedError,
     SandboxExpiredError,
     SandboxNotFoundError,
@@ -79,6 +80,35 @@ class SandboxLifecycleService:
             self.db.refresh(sandbox)
 
         return sandbox
+
+    def get_execution(
+        self,
+        sandbox_id: uuid.UUID,
+        execution_id: uuid.UUID,
+    ) -> JobExecutionResponse:
+        """Retrieve a persistent execution job record within a sandbox session."""
+        sandbox = self.get_sandbox(sandbox_id)
+        job = self.execution_repo.get_by_id(execution_id)
+        if not job or job.sandbox_id != sandbox.id:
+            raise ExecutionNotFoundError(
+                f"Execution job {execution_id} not found for sandbox {sandbox_id}"
+            )
+
+        return JobExecutionResponse(
+            execution_id=job.id,
+            sandbox_id=job.sandbox_id,
+            status=str(job.status),
+            exit_code=job.exit_code,
+            stdout=job.stdout,
+            stderr=job.stderr,
+            stdout_truncated=job.stdout_truncated,
+            stderr_truncated=job.stderr_truncated,
+            duration_ms=job.duration_ms,
+            submitted_at=job.submitted_at,
+            started_at=job.started_at,
+            completed_at=job.completed_at,
+            error_message=job.error_message,
+        )
 
     def delete_sandbox(self, sandbox_id: uuid.UUID) -> Sandbox:
         """Idempotently terminate and destroy a sandbox session."""

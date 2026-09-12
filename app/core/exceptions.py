@@ -54,3 +54,26 @@ class SandboxExpiredError(SandboxPlatformError):
 class SandboxDestroyedError(SandboxPlatformError):
     """Raised when an operation is attempted on a destroyed sandbox."""
     pass
+
+
+class ExecutionNotFoundError(SandboxPlatformError):
+    """Raised when requested execution ID does not exist for a sandbox."""
+    pass
+
+
+class LLMProviderError(SandboxPlatformError):
+    """Raised when an underlying LLM provider operation fails."""
+    pass
+
+
+class AgentTimeoutError(SandboxPlatformError):
+    """Raised when an agent execution loop exceeds configured timeout."""
+    pass
+
+
+class AgentMaxIterationsError(SandboxPlatformError):
+    """Raised when an agent execution loop exceeds maximum permitted tool iterations."""
+    pass
+
+
+

@@ -66,7 +66,7 @@ class JobExecutionResponse(BaseModel):
     stderr: str = Field(default="", description="Captured standard error")
     stdout_truncated: bool = Field(default=False, description="True if stdout was truncated")
     stderr_truncated: bool = Field(default=False, description="True if stderr was truncated")
-    duration_ms: int = Field(..., ge=0, description="Execution duration in milliseconds")
+    duration_ms: int | None = Field(None, ge=0, description="Execution duration in milliseconds")
     submitted_at: datetime = Field(..., description="UTC submission timestamp")
     started_at: datetime | None = Field(None, description="UTC start timestamp")
     completed_at: datetime | None = Field(None, description="UTC completion timestamp")

@@ -1,7 +1,11 @@
 """Application settings and resource limits configuration."""
 
+from pathlib import Path
+
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+_REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 
 
 class SandboxSettings(BaseSettings):
@@ -9,7 +13,7 @@ class SandboxSettings(BaseSettings):
 
     model_config = SettingsConfigDict(
         env_prefix="SANDBOX_",
-        env_file=".env",
+        env_file=(_REPO_ROOT / ".env", ".env"),
         env_file_encoding="utf-8",
         extra="ignore",
     )
@@ -92,6 +96,44 @@ class SandboxSettings(BaseSettings):
     # Metadata & Tracking
     PROJECT_LABEL: str = "ai-sandbox"
     MANAGED_BY_LABEL: str = "ai-sandbox-platform"
+
+    # LLM Provider Configuration
+    LLM_PROVIDER: str = Field(
+        default="gemini",
+        description="Active LLM provider (e.g. 'gemini', 'openai')",
+    )
+    LLM_API_KEY: str | None = Field(
+        default=None,
+        description="API key for LLM provider (supplied by SANDBOX_LLM_API_KEY)",
+    )
+    LLM_MODEL: str = Field(
+        default="gemini-2.5-flash",
+        description="Default model identifier to use (e.g. 'gemini-2.5-flash')",
+    )
+    LLM_BASE_URL: str | None = Field(
+        default=None,
+        description="Optional custom base URL for OpenAI-compatible proxies or local engines",
+    )
+    LLM_TEMPERATURE: float = Field(
+        default=0.0,
+        ge=0.0,
+        le=2.0,
+        description="Sampling temperature for LLM completions",
+    )
+
+    # Agent Loop Bounded Execution
+    AGENT_MAX_ITERATIONS: int = Field(
+        default=10,
+        ge=1,
+        le=50,
+        description="Maximum iterations allowed in an agent tool-calling loop",
+    )
+    AGENT_REQUEST_TIMEOUT: float = Field(
+        default=60.0,
+        ge=1.0,
+        le=300.0,
+        description="Overall timeout in seconds for agent request execution",
+    )
 
     @property
     def nano_cpus(self) -> int:
