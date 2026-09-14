@@ -9,6 +9,7 @@ import threading
 import time
 import uuid
 from collections.abc import Generator
+from typing import Any
 
 import docker
 import requests.exceptions
@@ -23,6 +24,8 @@ from app.core.exceptions import (
 from app.sandbox.docker_client import cleanup_container_safely, get_docker_client
 from app.sandbox.schemas import ExecutionRequest, ExecutionResult, ExecutionStatus
 from app.sandbox.security import build_container_parameters
+from app.security.engine import SecurityPolicyEngine
+from app.security.policy import RequestedPolicy
 
 logger = logging.getLogger(__name__)
 
@@ -74,6 +77,7 @@ class EphemeralSandboxEngine:
     ) -> None:
         self.config = config
         self._client = client
+        self.policy_engine = SecurityPolicyEngine(config=self.config)
         # In-process concurrency control
         self._semaphore = threading.BoundedSemaphore(
             value=self.config.GLOBAL_CONCURRENCY_LIMIT
@@ -91,33 +95,33 @@ class EphemeralSandboxEngine:
         request: ExecutionRequest | str,
         timeout_override: float | None = None,
         sandbox_id: str | None = None,
+        requested_policy: RequestedPolicy | dict[str, Any] | None = None,
     ) -> ExecutionResult:
         """Run untrusted code in an ephemeral hardened container.
 
         Lifecycle:
-        1. Acquire concurrency semaphore (reject if full).
-        2. Create container with security profile.
-        3. Wait for execution with timeout.
-        4. On timeout: forcefully kill container.
-        5. Stream stdout & stderr with hard byte bounds.
-        6. Destroy container in finally block.
-        7. Return structured ExecutionResult.
+        1. Evaluate & enforce centralized security policy.
+        2. Acquire concurrency semaphore (reject if full).
+        3. Create container with effective security profile.
+        4. Wait for execution with timeout.
+        5. On timeout: forcefully kill container.
+        6. Stream stdout & stderr with hard byte bounds.
+        7. Destroy container in finally block.
+        8. Return structured ExecutionResult with audit record.
         """
-        # Normalize request input
-        if isinstance(request, str):
-            code = request
-            requested_timeout = timeout_override
-        else:
-            code = request.code
-            requested_timeout = request.timeout_seconds or timeout_override
+        execution_sandbox_id = sandbox_id or str(uuid.uuid4())
 
-        effective_timeout = (
-            min(requested_timeout, self.config.TIMEOUT_SECONDS)
-            if requested_timeout is not None
-            else self.config.TIMEOUT_SECONDS
+        # 1. Enforce Centralized Security Policy & Invariants
+        policy_input = requested_policy if requested_policy is not None else request
+        effective_policy, audit_record = self.policy_engine.evaluate(
+            requested=policy_input,
+            timeout_override=timeout_override,
+            sandbox_id=execution_sandbox_id,
         )
 
-        # 1. Enforce Concurrency Limit
+        code = request if isinstance(request, str) else request.code
+
+        # 2. Enforce Concurrency Limit
         acquired = self._semaphore.acquire(blocking=False)
         if not acquired:
             logger.warning("Sandbox execution rejected: global concurrency limit reached.")
@@ -125,7 +129,6 @@ class EphemeralSandboxEngine:
                 "Sandbox execution concurrency limit reached. Please retry shortly."
             )
 
-        execution_sandbox_id = sandbox_id or str(uuid.uuid4())
         container: Container | None = None
         start_time = time.monotonic()
         exit_code: int | None = None
@@ -137,11 +140,12 @@ class EphemeralSandboxEngine:
         error_message: str | None = None
 
         try:
-            # 2. Build security configuration & create container
+            # 3. Build security configuration & create container
             container_params = build_container_parameters(
                 code=code,
                 sandbox_id=execution_sandbox_id,
                 config=self.config,
+                policy=effective_policy,
             )
 
             try:
@@ -150,9 +154,9 @@ class EphemeralSandboxEngine:
                 logger.error(f"Failed to create sandbox container: {exc}")
                 raise DockerEngineError(f"Container creation failed: {exc}") from exc
 
-            # 3. Wait for execution with timeout
+            # 4. Wait for execution with timeout
             try:
-                wait_result = container.wait(timeout=effective_timeout)
+                wait_result = container.wait(timeout=effective_policy.timeout_seconds)
                 if isinstance(wait_result, dict):
                     exit_code = wait_result.get("StatusCode")
                 elif isinstance(wait_result, int):
@@ -175,8 +179,8 @@ class EphemeralSandboxEngine:
                 status = ExecutionStatus.TIMED_OUT
                 exit_code = None
                 logger.info(
-                    "Execution timed out "
-                    f"({effective_timeout}s) for sandbox {execution_sandbox_id}: {exc}"
+                    f"Execution timed out ({effective_policy.timeout_seconds}s) "
+                    f"for sandbox {execution_sandbox_id}: {exc}"
                 )
 
                 # 4. Immediately kill running container
@@ -208,7 +212,7 @@ class EphemeralSandboxEngine:
                 )
                 stdout, stdout_truncated = _read_bounded_stream(
                     stdout_gen,
-                    self.config.MAX_STDOUT_BYTES,
+                    effective_policy.max_stdout_bytes,
                 )
 
                 stderr_gen = container.logs(
@@ -218,7 +222,7 @@ class EphemeralSandboxEngine:
                 )
                 stderr, stderr_truncated = _read_bounded_stream(
                     stderr_gen,
-                    self.config.MAX_STDERR_BYTES,
+                    effective_policy.max_stderr_bytes,
                 )
             except Exception as exc:
                 logger.warning(
@@ -246,4 +250,5 @@ class EphemeralSandboxEngine:
             stderr_truncated=stderr_truncated,
             duration_ms=duration_ms,
             error_message=error_message,
+            audit=audit_record,
         )

@@ -76,4 +76,9 @@ class AgentMaxIterationsError(SandboxPlatformError):
     pass
 
 
+class SecurityPolicyViolationError(SandboxPlatformError):
+    """Raised when a request violates platform security policies or invariants."""
+    pass
+
+
 
