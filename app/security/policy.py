@@ -157,7 +157,7 @@ class EffectiveSandboxPolicy(BaseModel):
     @field_validator("cap_drop", "security_opt", mode="before")
     @classmethod
     def _validate_tuple(cls, v: Any) -> tuple[str, ...]:
-        if isinstance(v, (list, tuple)):
+        if isinstance(v, list | tuple):
             return tuple(v)
         return (v,)
 
