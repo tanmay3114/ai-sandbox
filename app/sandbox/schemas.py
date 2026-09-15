@@ -1,6 +1,7 @@
 """Pydantic schemas and enums for sandbox requests and execution results."""
 
 from enum import StrEnum
+from typing import Any
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -77,4 +78,8 @@ class ExecutionResult(BaseModel):
     error_message: str | None = Field(
         None,
         description="Internal error description if status is ERROR",
+    )
+    audit: Any | None = Field(
+        default=None,
+        description="Lightweight security policy enforcement audit record",
     )

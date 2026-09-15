@@ -19,6 +19,7 @@ from app.core.exceptions import (
     LLMProviderError,
     SandboxNotFoundError,
     SandboxPlatformError,
+    SecurityPolicyViolationError,
 )
 from app.db.session import SessionLocal
 from app.models.sandbox import InvalidStateTransitionError
@@ -203,6 +204,23 @@ async def llm_provider_handler(
             "error": "LLMProviderError",
             "message": "AI model provider communication failed.",
             "details": {},
+        },
+    )
+
+
+@app.exception_handler(SecurityPolicyViolationError)
+async def security_policy_violation_handler(
+    request: Request,
+    exc: SecurityPolicyViolationError,
+) -> JSONResponse:
+    """Handle security policy violations with explicit HTTP 400."""
+    logger.warning(f"Security policy violation on {request.url.path}: {exc.message}")
+    return JSONResponse(
+        status_code=status.HTTP_400_BAD_REQUEST,
+        content={
+            "error": "SecurityPolicyViolationError",
+            "message": exc.message,
+            "details": exc.details,
         },
     )
 

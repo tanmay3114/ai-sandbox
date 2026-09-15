@@ -5,51 +5,47 @@ from typing import Any
 import docker.types
 
 from app.core.config import SandboxSettings, settings
+from app.security.policy import EffectiveSandboxPolicy
 
 
 def build_container_parameters(
     code: str,
     sandbox_id: str,
     config: SandboxSettings = settings,
+    policy: EffectiveSandboxPolicy | None = None,
 ) -> dict[str, Any]:
     """Construct hardened Docker container parameters.
 
-    Security controls:
-    1. Privilege: non-root user (10001:10001), cap_drop ALL, no-new-privileges, unprivileged.
-    2. Filesystem: read_only root filesystem, restricted tmpfs at /tmp, 0 host mounts.
-    3. Network: network_mode='none' (completely isolated network stack).
-    4. Compute: strict memory limit, memory+swap limit, nano_cpus, pids_limit.
-    5. Environment: minimal sanitized env vars; zero host environment or secrets forwarded.
-    6. Command: strict argument vector ["python", "-c", code] avoiding shell evaluation.
-    7. Ownership: metadata labels for project-scoped lifecycle tracking.
+    Derives container parameters strictly from an immutable EffectiveSandboxPolicy.
+    If no policy is provided, instantiates the default trusted platform policy.
     """
+    if policy is None:
+        from app.security.engine import SecurityPolicyEngine
+
+        policy = SecurityPolicyEngine(config=config).get_default_policy()
+
     return {
-        "image": config.BASE_IMAGE,
+        "image": policy.image,
         "command": ["python", "-c", code],
         "detach": True,
         # Compute & Memory bounds
-        "mem_limit": config.MEMORY_LIMIT,
-        "memswap_limit": config.MEMSWAP_LIMIT,
-        "nano_cpus": config.nano_cpus,
-        "pids_limit": config.PIDS_LIMIT,
+        "mem_limit": policy.memory_limit,
+        "memswap_limit": policy.memswap_limit,
+        "nano_cpus": policy.nano_cpus,
+        "pids_limit": policy.pids_limit,
         # Network confinement
-        "network_mode": "none",
+        "network_mode": policy.network_mode,
         # Privilege confinement
-        "privileged": False,
-        "cap_drop": ["ALL"],
-        "security_opt": ["no-new-privileges:true"],
-        "user": "10001:10001",
+        "privileged": policy.privileged,
+        "cap_drop": list(policy.cap_drop),
+        "security_opt": list(policy.security_opt),
+        "user": policy.user,
         # Filesystem isolation
-        "read_only": True,
-        "tmpfs": {
-            "/tmp": f"size={config.TMPFS_SIZE},noexec,nosuid,nodev",
-        },
-        "volumes": {},  # Strictly empty - no host directory or docker.sock mounts
+        "read_only": policy.read_only,
+        "tmpfs": dict(policy.tmpfs),
+        "volumes": dict(policy.volumes),  # Strictly empty - no host directory or docker.sock mounts
         # Sanitized container environment
-        "environment": {
-            "PYTHONDONTWRITEBYTECODE": "1",
-            "PYTHONUNBUFFERED": "1",
-        },
+        "environment": dict(policy.environment),
         # Logging bounds to protect Docker host disk space
         "log_config": docker.types.LogConfig(
             type=docker.types.LogConfig.types.JSON,
@@ -57,8 +53,8 @@ def build_container_parameters(
         ),
         # Platform tracking metadata
         "labels": {
-            "project": config.PROJECT_LABEL,
-            "managed-by": config.MANAGED_BY_LABEL,
+            "project": policy.project_label,
+            "managed-by": policy.managed_by_label,
             "sandbox_id": sandbox_id,
         },
     }
