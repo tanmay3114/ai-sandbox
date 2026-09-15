@@ -37,15 +37,15 @@ def build_container_parameters(
         "network_mode": policy.network_mode,
         # Privilege confinement
         "privileged": policy.privileged,
-        "cap_drop": policy.cap_drop,
-        "security_opt": policy.security_opt,
+        "cap_drop": list(policy.cap_drop),
+        "security_opt": list(policy.security_opt),
         "user": policy.user,
         # Filesystem isolation
         "read_only": policy.read_only,
-        "tmpfs": policy.tmpfs,
-        "volumes": policy.volumes,  # Strictly empty - no host directory or docker.sock mounts
+        "tmpfs": dict(policy.tmpfs),
+        "volumes": dict(policy.volumes),  # Strictly empty - no host directory or docker.sock mounts
         # Sanitized container environment
-        "environment": policy.environment,
+        "environment": dict(policy.environment),
         # Logging bounds to protect Docker host disk space
         "log_config": docker.types.LogConfig(
             type=docker.types.LogConfig.types.JSON,

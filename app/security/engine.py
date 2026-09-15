@@ -1,7 +1,10 @@
 """Security Policy Engine enforcing defense-in-depth platform security invariants."""
 
 import logging
+import math
 from typing import Any
+
+from pydantic import ValidationError
 
 from app.core.config import SandboxSettings, settings
 from app.core.exceptions import SecurityPolicyViolationError
@@ -17,16 +20,28 @@ logger = logging.getLogger(__name__)
 
 def _parse_memory_bytes(val: str) -> int:
     """Parse a memory limit string (e.g. '256m', '1g', '512k') into integer bytes."""
+    if not isinstance(val, str) or not val.strip():
+        raise ValueError("Memory limit must be a non-empty string")
     clean = val.strip().lower()
     if clean.endswith("g"):
-        return int(clean[:-1]) * 1024 * 1024 * 1024
-    if clean.endswith("m"):
-        return int(clean[:-1]) * 1024 * 1024
-    if clean.endswith("k"):
-        return int(clean[:-1]) * 1024
-    if clean.endswith("b"):
-        return int(clean[:-1])
-    return int(clean)
+        num = int(clean[:-1])
+        multiplier = 1024 * 1024 * 1024
+    elif clean.endswith("m"):
+        num = int(clean[:-1])
+        multiplier = 1024 * 1024
+    elif clean.endswith("k"):
+        num = int(clean[:-1])
+        multiplier = 1024
+    elif clean.endswith("b"):
+        num = int(clean[:-1])
+        multiplier = 1
+    else:
+        num = int(clean)
+        multiplier = 1
+
+    if num <= 0:
+        raise ValueError(f"Memory limit must be positive, got {val}")
+    return num * multiplier
 
 
 class SecurityPolicyEngine:
@@ -93,23 +108,33 @@ class SecurityPolicyEngine:
         """
         target_id = sandbox_id or "unspecified"
 
-        # 1. Normalize input to RequestedPolicy
-        if requested is None or isinstance(requested, str):
-            req_policy = RequestedPolicy(timeout_seconds=timeout_override)
-        elif isinstance(requested, ExecutionRequest):
-            req_policy = RequestedPolicy(
-                timeout_seconds=requested.timeout_seconds or timeout_override
+        # 1. Normalize input to RequestedPolicy with strict schema validation
+        try:
+            if requested is None or isinstance(requested, str):
+                req_policy = RequestedPolicy(timeout_seconds=timeout_override)
+            elif isinstance(requested, ExecutionRequest):
+                req_policy = RequestedPolicy(
+                    timeout_seconds=requested.timeout_seconds or timeout_override
+                )
+            elif isinstance(requested, dict):
+                req_policy = RequestedPolicy.model_validate(requested)
+                if timeout_override is not None and req_policy.timeout_seconds is None:
+                    req_policy.timeout_seconds = timeout_override
+            elif isinstance(requested, RequestedPolicy):
+                req_policy = requested
+                if timeout_override is not None and req_policy.timeout_seconds is None:
+                    req_policy.timeout_seconds = timeout_override
+            else:
+                req_policy = RequestedPolicy(timeout_seconds=timeout_override)
+        except ValidationError as err:
+            logger.warning(
+                f"Security policy rejection for sandbox {target_id}: "
+                f"invalid or unknown policy fields requested: {err}"
             )
-        elif isinstance(requested, dict):
-            req_policy = RequestedPolicy.model_validate(requested)
-            if timeout_override is not None and req_policy.timeout_seconds is None:
-                req_policy.timeout_seconds = timeout_override
-        elif isinstance(requested, RequestedPolicy):
-            req_policy = requested
-            if timeout_override is not None and req_policy.timeout_seconds is None:
-                req_policy.timeout_seconds = timeout_override
-        else:
-            req_policy = RequestedPolicy(timeout_seconds=timeout_override)
+            raise SecurityPolicyViolationError(
+                f"Requested policy contains invalid or forbidden fields: {err}",
+                details={"violation": "invalid_policy_specification", "errors": err.errors()},
+            ) from err
 
         # 2. Strict Security Invariant Verification (Hard Rejections)
         if req_policy.privileged is True:
@@ -233,28 +258,39 @@ class SecurityPolicyEngine:
 
         approved_image = self.config.ALLOWED_RUNTIMES[effective_runtime]
 
-        # 3. Resource Bounds & Safe Clamping
+        # 3. Resource Bounds & Safe Clamping with Robust Numeric Validation
         clamped_fields: list[str] = []
 
         # Timeout clamping: [0.5, platform TIMEOUT_SECONDS]
         effective_timeout = self.config.TIMEOUT_SECONDS
         if req_policy.timeout_seconds is not None:
-            if req_policy.timeout_seconds > self.config.TIMEOUT_SECONDS:
+            try:
+                t_val = float(req_policy.timeout_seconds)
+                if not math.isfinite(t_val) or t_val <= 0:
+                    effective_timeout = self.config.TIMEOUT_SECONDS
+                    clamped_fields.append("timeout_seconds")
+                elif t_val > self.config.TIMEOUT_SECONDS:
+                    effective_timeout = self.config.TIMEOUT_SECONDS
+                    clamped_fields.append("timeout_seconds")
+                elif t_val < 0.5:
+                    effective_timeout = 0.5
+                    clamped_fields.append("timeout_seconds")
+                else:
+                    effective_timeout = t_val
+            except (ValueError, TypeError):
                 effective_timeout = self.config.TIMEOUT_SECONDS
                 clamped_fields.append("timeout_seconds")
-            elif req_policy.timeout_seconds < 0.5:
-                effective_timeout = 0.5
-                clamped_fields.append("timeout_seconds")
-            else:
-                effective_timeout = req_policy.timeout_seconds
 
-        # Memory limit clamping: cannot exceed platform MEMORY_LIMIT
+        # Memory limit clamping: cannot exceed platform MEMORY_LIMIT or be under 16MB
         effective_memory = self.config.MEMORY_LIMIT
         platform_mem_bytes = _parse_memory_bytes(self.config.MEMORY_LIMIT)
         if req_policy.memory_limit is not None:
             try:
                 requested_mem_bytes = _parse_memory_bytes(req_policy.memory_limit)
-                if requested_mem_bytes > platform_mem_bytes:
+                if (
+                    requested_mem_bytes > platform_mem_bytes
+                    or requested_mem_bytes < 16 * 1024 * 1024
+                ):
                     effective_memory = self.config.MEMORY_LIMIT
                     clamped_fields.append("memory_limit")
                 else:
@@ -266,43 +302,66 @@ class SecurityPolicyEngine:
         # CPU limit clamping: [0.1, platform CPU_LIMIT]
         effective_cpu = self.config.CPU_LIMIT
         if req_policy.cpu_limit is not None:
-            if req_policy.cpu_limit > self.config.CPU_LIMIT:
+            try:
+                c_val = float(req_policy.cpu_limit)
+                if not math.isfinite(c_val) or c_val <= 0:
+                    effective_cpu = self.config.CPU_LIMIT
+                    clamped_fields.append("cpu_limit")
+                elif c_val > self.config.CPU_LIMIT:
+                    effective_cpu = self.config.CPU_LIMIT
+                    clamped_fields.append("cpu_limit")
+                elif c_val < 0.1:
+                    effective_cpu = 0.1
+                    clamped_fields.append("cpu_limit")
+                else:
+                    effective_cpu = c_val
+            except (ValueError, TypeError):
                 effective_cpu = self.config.CPU_LIMIT
                 clamped_fields.append("cpu_limit")
-            elif req_policy.cpu_limit < 0.1:
-                effective_cpu = 0.1
-                clamped_fields.append("cpu_limit")
-            else:
-                effective_cpu = req_policy.cpu_limit
         nano_cpus = int(effective_cpu * 1_000_000_000)
 
         # PID limit clamping: [8, platform PIDS_LIMIT]
         effective_pids = self.config.PIDS_LIMIT
         if req_policy.pids_limit is not None:
-            if req_policy.pids_limit > self.config.PIDS_LIMIT:
+            try:
+                p_val = int(req_policy.pids_limit)
+                if p_val > self.config.PIDS_LIMIT:
+                    effective_pids = self.config.PIDS_LIMIT
+                    clamped_fields.append("pids_limit")
+                elif p_val < 8:
+                    effective_pids = 8
+                    clamped_fields.append("pids_limit")
+                else:
+                    effective_pids = p_val
+            except (ValueError, TypeError):
                 effective_pids = self.config.PIDS_LIMIT
                 clamped_fields.append("pids_limit")
-            elif req_policy.pids_limit < 8:
-                effective_pids = 8
-                clamped_fields.append("pids_limit")
-            else:
-                effective_pids = req_policy.pids_limit
 
-        # Output bounds: cannot exceed platform limits
+        # Output bounds: cannot exceed platform limits, minimum 0
         effective_stdout_bytes = self.config.MAX_STDOUT_BYTES
         if req_policy.max_stdout_bytes is not None:
-            effective_stdout_bytes = min(
-                req_policy.max_stdout_bytes, self.config.MAX_STDOUT_BYTES
-            )
-            if effective_stdout_bytes != req_policy.max_stdout_bytes:
+            try:
+                s_val = int(req_policy.max_stdout_bytes)
+                if s_val < 0 or s_val > self.config.MAX_STDOUT_BYTES:
+                    effective_stdout_bytes = self.config.MAX_STDOUT_BYTES
+                    clamped_fields.append("max_stdout_bytes")
+                else:
+                    effective_stdout_bytes = s_val
+            except (ValueError, TypeError):
+                effective_stdout_bytes = self.config.MAX_STDOUT_BYTES
                 clamped_fields.append("max_stdout_bytes")
 
         effective_stderr_bytes = self.config.MAX_STDERR_BYTES
         if req_policy.max_stderr_bytes is not None:
-            effective_stderr_bytes = min(
-                req_policy.max_stderr_bytes, self.config.MAX_STDERR_BYTES
-            )
-            if effective_stderr_bytes != req_policy.max_stderr_bytes:
+            try:
+                se_val = int(req_policy.max_stderr_bytes)
+                if se_val < 0 or se_val > self.config.MAX_STDERR_BYTES:
+                    effective_stderr_bytes = self.config.MAX_STDERR_BYTES
+                    clamped_fields.append("max_stderr_bytes")
+                else:
+                    effective_stderr_bytes = se_val
+            except (ValueError, TypeError):
+                effective_stderr_bytes = self.config.MAX_STDERR_BYTES
                 clamped_fields.append("max_stderr_bytes")
 
         # 4. Construct Immutable Effective Policy
@@ -332,14 +391,29 @@ class SecurityPolicyEngine:
             managed_by_label=self.config.MANAGED_BY_LABEL,
         )
 
-        # 5. Generate Audit Record
+        # 5. Generate Sanitized Audit Record
+        # Strictly whitelist safe tunable fields to prevent any secret or path leakage
+        safe_requested: dict[str, Any] = {}
+        for safe_key in (
+            "runtime",
+            "timeout_seconds",
+            "memory_limit",
+            "cpu_limit",
+            "pids_limit",
+            "max_stdout_bytes",
+            "max_stderr_bytes",
+        ):
+            val = getattr(req_policy, safe_key, None)
+            if val is not None:
+                safe_requested[safe_key] = val
+
         decision = "clamped" if clamped_fields else "allowed"
         audit = SecurityAuditRecord(
             sandbox_id=target_id,
             decision=decision,
             clamped_fields=clamped_fields,
             violations=[],
-            requested_summary=req_policy.model_dump(exclude_none=True),
+            requested_summary=safe_requested,
             effective_summary={
                 "runtime": effective_policy.runtime,
                 "timeout_seconds": effective_policy.timeout_seconds,

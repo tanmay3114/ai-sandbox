@@ -3,7 +3,8 @@
 from datetime import UTC, datetime
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic_core import CoreSchema, core_schema
 
 
 class RequestedPolicy(BaseModel):
@@ -11,9 +12,10 @@ class RequestedPolicy(BaseModel):
 
     Captures both permissible tuning parameters and any attempt to request
     forbidden or security-sensitive capabilities for explicit policy evaluation.
+    Rejects any unknown fields to prevent parameter injection attacks.
     """
 
-    model_config = ConfigDict(extra="ignore")
+    model_config = ConfigDict(extra="forbid")
 
     # Safe tunable parameters
     runtime: str | None = Field(
@@ -84,14 +86,45 @@ class RequestedPolicy(BaseModel):
     )
 
 
-class EffectiveSandboxPolicy(BaseModel):
-    """Trusted, immutable, and normalized security policy.
+class FrozenDict(dict):
+    """Immutable dictionary subclass preventing in-place modification of security policies."""
 
-    The execution engine and container builder accept ONLY this model,
-    ensuring that no external caller can weaken or bypass platform invariants.
+    def __readonly__(self, *args: Any, **kwargs: Any) -> None:
+        raise TypeError("FrozenDict is immutable and cannot be modified")
+
+    __setitem__ = __readonly__
+    __delitem__ = __readonly__
+    pop = __readonly__
+    popitem = __readonly__
+    clear = __readonly__
+    update = __readonly__
+    setdefault = __readonly__
+
+    def __copy__(self) -> "FrozenDict":
+        return self
+
+    def __deepcopy__(self, memo: Any) -> "FrozenDict":
+        return self
+
+    @classmethod
+    def __get_pydantic_core_schema__(
+        cls, source_type: Any, handler: Any
+    ) -> CoreSchema:
+        return core_schema.no_info_after_validator_function(
+            cls,
+            core_schema.dict_schema(),
+        )
+
+
+class EffectiveSandboxPolicy(BaseModel):
+    """Trusted, deeply immutable, and normalized security policy.
+
+    The execution engine and container builder accept ONLY this model.
+    Guarantees both top-level immutability (frozen=True) and nested collection
+    immutability (tuples for lists, FrozenDict for mappings).
     """
 
-    model_config = ConfigDict(frozen=True)
+    model_config = ConfigDict(frozen=True, arbitrary_types_allowed=True)
 
     # Approved runtime & container image
     runtime: str
@@ -109,17 +142,33 @@ class EffectiveSandboxPolicy(BaseModel):
     # Non-negotiable security invariants
     network_mode: str = "none"
     privileged: bool = False
-    cap_drop: list[str] = Field(default_factory=lambda: ["ALL"])
-    security_opt: list[str] = Field(default_factory=lambda: ["no-new-privileges:true"])
+    cap_drop: tuple[str, ...] = ("ALL",)
+    security_opt: tuple[str, ...] = ("no-new-privileges:true",)
     user: str = "10001:10001"
     read_only: bool = True
-    tmpfs: dict[str, str]
-    volumes: dict[str, Any] = Field(default_factory=dict)
-    environment: dict[str, str]
+    tmpfs: FrozenDict
+    volumes: FrozenDict = Field(default_factory=FrozenDict)
+    environment: FrozenDict
 
     # Platform tracking metadata
     project_label: str
     managed_by_label: str
+
+    @field_validator("cap_drop", "security_opt", mode="before")
+    @classmethod
+    def _validate_tuple(cls, v: Any) -> tuple[str, ...]:
+        if isinstance(v, (list, tuple)):
+            return tuple(v)
+        return (v,)
+
+    @field_validator("tmpfs", "volumes", "environment", mode="before")
+    @classmethod
+    def _validate_frozen_dict(cls, v: Any) -> FrozenDict:
+        if isinstance(v, FrozenDict):
+            return v
+        if isinstance(v, dict):
+            return FrozenDict(v)
+        return v
 
 
 class SecurityAuditRecord(BaseModel):
