@@ -22,18 +22,7 @@ next execution.
 - The trusted runtime image available locally (Docker will pull
   `python:3.12-slim` when needed)
 
-## Repository Structure
-
-```text
-ai-sandbox/
-├── backend/    # FastAPI, PostgreSQL, Docker execution engine, Agent, MCP
-├── frontend/   # React + TypeScript + Vite + Tailwind CSS dashboard
-└── docs/       # Architecture documents and specifications
-```
-
 ## Local setup
-
-### Backend
 
 ```bash
 git clone <your-private-repository-url>
