@@ -46,9 +46,7 @@ class GeminiProvider(LLMProvider):
         self, messages: list[LLMMessage]
     ) -> tuple[str | None, list[types.Content]]:
         """Separate system instructions and convert remaining messages to Gemini Content models."""
-        system_parts = [
-            msg.content for msg in messages if msg.role == "system" and msg.content
-        ]
+        system_parts = [msg.content for msg in messages if msg.role == "system" and msg.content]
         system_instruction = "\n\n".join(system_parts) if system_parts else None
 
         contents: list[types.Content] = []
@@ -99,9 +97,7 @@ class GeminiProvider(LLMProvider):
                                 types.Part(
                                     function_call=types.FunctionCall(
                                         name=tc.name,
-                                        args=tc.arguments
-                                        if isinstance(tc.arguments, dict)
-                                        else {},
+                                        args=tc.arguments if isinstance(tc.arguments, dict) else {},
                                         id=tc.id,
                                     ),
                                     thought_signature=tc.thought_signature,

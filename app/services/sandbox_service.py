@@ -4,8 +4,7 @@ import logging
 
 from starlette.concurrency import run_in_threadpool
 
-from app.core.config import SandboxSettings, settings
-from app.sandbox.engine import EphemeralSandboxEngine
+from app.sandbox.backend import SandboxBackend
 from app.sandbox.schemas import ExecutionRequest, ExecutionResult
 
 logger = logging.getLogger(__name__)
@@ -20,13 +19,11 @@ class SandboxService:
 
     def __init__(
         self,
-        engine: EphemeralSandboxEngine | None = None,
-        config: SandboxSettings = settings,
+        backend: SandboxBackend,
     ) -> None:
-        self.config = config
-        self.engine = engine or EphemeralSandboxEngine(config=self.config)
+        self.backend = backend
 
     async def execute_code(self, request: ExecutionRequest) -> ExecutionResult:
         """Execute untrusted code asynchronously via threadpool worker."""
         logger.info("Offloading sandbox execution to worker threadpool...")
-        return await run_in_threadpool(self.engine.execute, request)
+        return await run_in_threadpool(self.backend.execute, request)

@@ -145,6 +145,6 @@ def test_concurrency_limit_rejection(docker_client):
         assert res1.status in (ExecutionStatus.COMPLETED, ExecutionStatus.TIMED_OUT)
 
 
-def test_idempotent_cleanup():
+def test_idempotent_cleanup(fast_settings: SandboxSettings):
     """Test that safe container cleanup is completely idempotent."""
-    assert cleanup_container_safely(None) is True
+    assert cleanup_container_safely(None, sandbox_id="missing", config=fast_settings) is True

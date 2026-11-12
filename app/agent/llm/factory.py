@@ -31,4 +31,3 @@ def get_llm_provider(config: SandboxSettings | None = None) -> LLMProvider:
                 f"Unsupported LLM provider: '{cfg.LLM_PROVIDER}'. Allowed: ['gemini', 'openai']",
                 details={"provider": cfg.LLM_PROVIDER},
             )
-

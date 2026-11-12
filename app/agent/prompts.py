@@ -20,4 +20,3 @@ Instructions:
 - Once you have achieved the user's objective or determined the result, provide a clear, helpful
   final natural-language explanation.
 """
-

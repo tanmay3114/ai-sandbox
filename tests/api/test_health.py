@@ -5,7 +5,7 @@ from unittest.mock import MagicMock
 import pytest
 from fastapi.testclient import TestClient
 
-from app.api.dependencies import get_docker_client_dependency
+from app.api.dependencies import get_sandbox_backend
 from app.main import app
 
 
@@ -35,10 +35,10 @@ def test_ready_success(client: TestClient):
 
 def test_ready_docker_unavailable(client: TestClient):
     """Test that GET /ready returns 503 when Docker engine fails connectivity ping."""
-    mock_docker = MagicMock()
-    mock_docker.ping.side_effect = Exception("Connection refused to docker daemon")
+    mock_backend = MagicMock()
+    mock_backend.check_health.side_effect = Exception("Connection refused to sandbox backend")
 
-    app.dependency_overrides[get_docker_client_dependency] = lambda: mock_docker
+    app.dependency_overrides[get_sandbox_backend] = lambda: mock_backend
     try:
         response = client.get("/ready")
         assert response.status_code == 503

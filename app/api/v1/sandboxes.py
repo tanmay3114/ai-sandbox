@@ -3,13 +3,29 @@
 import logging
 import uuid
 
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, Query, status
 
 from app.api.dependencies import (
+    get_agent_orchestrator_service,
     get_sandbox_lifecycle_service,
     get_sandbox_service,
 )
-from app.sandbox.schemas import ExecutionRequest, ExecutionResult
+from app.sandbox.schemas import (
+    CreateDirectoryRequest,
+    CreateDirectoryResponse,
+    DeleteFileResponse,
+    ExecutionRequest,
+    ExecutionResult,
+    FileContent,
+    FileInfo,
+    FileListResponse,
+    WriteFileRequest,
+)
+from app.schemas.agent import (
+    AgentTaskCreateRequest,
+    AgentTaskListResponse,
+    AgentTaskResponse,
+)
 from app.schemas.errors import ErrorResponse
 from app.schemas.sandbox import (
     CreateSandboxRequest,
@@ -17,6 +33,7 @@ from app.schemas.sandbox import (
     SandboxDetailResponse,
     SandboxResponse,
 )
+from app.services.agent_orchestrator_service import AgentOrchestratorService
 from app.services.sandbox_lifecycle_service import SandboxLifecycleService
 from app.services.sandbox_service import SandboxService
 
@@ -165,10 +182,292 @@ async def get_execution_result(
     return service.get_execution(sandbox_id=sandbox_id, execution_id=execution_id)
 
 
+# ===================================================================
+# Persistent Workspace File Management Endpoints
+# ===================================================================
+
+
+@router.post(
+    "/{sandbox_id}/files",
+    response_model=FileInfo,
+    status_code=status.HTTP_200_OK,
+    responses={
+        200: {"model": FileInfo, "description": "File created or overwritten in workspace"},
+        400: {
+            "model": ErrorResponse,
+            "description": "Path traversal, quota exceeded, invalid encoding, or unusable sandbox",
+        },
+        404: {"model": ErrorResponse, "description": "Sandbox not found"},
+        422: {"description": "Validation error in request payload"},
+    },
+    summary="Write Workspace File",
+    description="Create or atomically overwrite a file in the sandbox's persistent workspace.",
+)
+async def write_workspace_file(
+    sandbox_id: uuid.UUID,
+    request: WriteFileRequest,
+    service: SandboxLifecycleService = Depends(get_sandbox_lifecycle_service),
+) -> FileInfo:
+    """Write a file into the designated sandbox's persistent workspace."""
+    return service.write_file(
+        sandbox_id=sandbox_id,
+        path=request.path,
+        content=request.content,
+        encoding=request.encoding,
+    )
+
+
+@router.get(
+    "/{sandbox_id}/files",
+    response_model=FileListResponse,
+    status_code=status.HTTP_200_OK,
+    responses={
+        200: {"model": FileListResponse, "description": "Workspace directory contents listed"},
+        400: {"model": ErrorResponse, "description": "Invalid path or unusable sandbox"},
+        404: {"model": ErrorResponse, "description": "Sandbox or directory not found"},
+    },
+    summary="List Workspace Files",
+    description="List files and directories inside the sandbox's persistent workspace.",
+)
+async def list_workspace_files(
+    sandbox_id: uuid.UUID,
+    path: str = Query(
+        default="",
+        max_length=255,
+        description="Optional workspace-relative subdirectory path to list",
+    ),
+    service: SandboxLifecycleService = Depends(get_sandbox_lifecycle_service),
+) -> FileListResponse:
+    """List files and directories in the designated sandbox's persistent workspace."""
+    return service.list_files(sandbox_id=sandbox_id, path=path)
+
+
+@router.get(
+    "/{sandbox_id}/files/{file_path:path}",
+    response_model=FileContent,
+    status_code=status.HTTP_200_OK,
+    responses={
+        200: {"model": FileContent, "description": "File content retrieved"},
+        400: {"model": ErrorResponse, "description": "Invalid path, quota, or unusable sandbox"},
+        404: {"model": ErrorResponse, "description": "Sandbox or file not found"},
+    },
+    summary="Read Workspace File",
+    description="Read a file from the sandbox's persistent workspace as UTF-8 text or base64.",
+)
+async def read_workspace_file(
+    sandbox_id: uuid.UUID,
+    file_path: str,
+    service: SandboxLifecycleService = Depends(get_sandbox_lifecycle_service),
+) -> FileContent:
+    """Read a file from the designated sandbox's persistent workspace."""
+    return service.read_file(sandbox_id=sandbox_id, path=file_path)
+
+
+@router.post(
+    "/{sandbox_id}/directories",
+    response_model=CreateDirectoryResponse,
+    status_code=status.HTTP_200_OK,
+    responses={
+        200: {"model": CreateDirectoryResponse, "description": "Directory created in workspace"},
+        400: {"model": ErrorResponse, "description": "Invalid path or unusable sandbox"},
+        404: {"model": ErrorResponse, "description": "Sandbox not found"},
+        422: {"description": "Validation error in request payload"},
+    },
+    summary="Create Workspace Directory",
+    description="Create a directory (and any parent directories) inside the sandbox's workspace.",
+)
+async def create_workspace_directory(
+    sandbox_id: uuid.UUID,
+    request: CreateDirectoryRequest,
+    service: SandboxLifecycleService = Depends(get_sandbox_lifecycle_service),
+) -> CreateDirectoryResponse:
+    """Create a directory inside the designated sandbox's persistent workspace."""
+    created = service.create_directory(sandbox_id=sandbox_id, path=request.path)
+    return CreateDirectoryResponse(path=request.path, created=created)
+
+
+@router.delete(
+    "/{sandbox_id}/files",
+    response_model=DeleteFileResponse,
+    status_code=status.HTTP_200_OK,
+    responses={
+        200: {"model": DeleteFileResponse, "description": "File or empty directory deleted"},
+        400: {"model": ErrorResponse, "description": "Invalid path or unusable sandbox"},
+        404: {"model": ErrorResponse, "description": "Sandbox or file not found"},
+    },
+    summary="Delete Workspace File (Query Parameter)",
+    description="Delete a file or empty directory inside the sandbox's persistent workspace.",
+)
+async def delete_workspace_file_by_query(
+    sandbox_id: uuid.UUID,
+    path: str = Query(
+        ...,
+        min_length=1,
+        max_length=255,
+        description="Workspace-relative file or empty directory path to delete",
+    ),
+    service: SandboxLifecycleService = Depends(get_sandbox_lifecycle_service),
+) -> DeleteFileResponse:
+    """Delete a file or empty directory in the designated sandbox's workspace."""
+    deleted = service.delete_file(sandbox_id=sandbox_id, path=path)
+    return DeleteFileResponse(path=path, deleted=deleted)
+
+
+@router.delete(
+    "/{sandbox_id}/files/{file_path:path}",
+    response_model=DeleteFileResponse,
+    status_code=status.HTTP_200_OK,
+    responses={
+        200: {"model": DeleteFileResponse, "description": "File or empty directory deleted"},
+        400: {"model": ErrorResponse, "description": "Invalid path or unusable sandbox"},
+        404: {"model": ErrorResponse, "description": "Sandbox or file not found"},
+    },
+    summary="Delete Workspace File",
+    description="Delete a file or empty directory inside the sandbox's persistent workspace.",
+)
+async def delete_workspace_file(
+    sandbox_id: uuid.UUID,
+    file_path: str,
+    service: SandboxLifecycleService = Depends(get_sandbox_lifecycle_service),
+) -> DeleteFileResponse:
+    """Delete a file or empty directory in the designated sandbox's workspace."""
+    deleted = service.delete_file(sandbox_id=sandbox_id, path=file_path)
+    return DeleteFileResponse(path=file_path, deleted=deleted)
+
+
+# ===================================================================
+# Agent Orchestration Endpoints
+# ===================================================================
+
+
+@router.post(
+    "/{sandbox_id}/agent/tasks",
+    response_model=AgentTaskResponse,
+    status_code=status.HTTP_200_OK,
+    responses={
+        200: {"model": AgentTaskResponse, "description": "Agent task executed successfully"},
+        400: {"model": ErrorResponse, "description": "Agent domain or execution error"},
+        403: {"model": ErrorResponse, "description": "Security policy violation"},
+        404: {"model": ErrorResponse, "description": "Sandbox not found"},
+        409: {"model": ErrorResponse, "description": "Task was cancelled"},
+        422: {"description": "Validation error in task prompt or timeout"},
+        500: {"model": ErrorResponse, "description": "Agent max iterations exceeded"},
+        502: {"model": ErrorResponse, "description": "LLM provider communication failed"},
+        504: {"model": ErrorResponse, "description": "Agent task timed out"},
+    },
+    summary="Execute Agent Orchestration Task",
+    description="""
+Executes an autonomous, model-driven reasoning and tool-calling loop strictly bound to
+the specified authorized sandbox. The agent inspects files, creates code, runs executions,
+recovers from non-zero exit errors, and returns a verified final response.
+""",
+)
+async def create_and_run_agent_task(
+    sandbox_id: uuid.UUID,
+    request: AgentTaskCreateRequest,
+    service: AgentOrchestratorService = Depends(get_agent_orchestrator_service),
+) -> AgentTaskResponse:
+    """Create and execute an autonomous agent task bound to the active sandbox."""
+    logger.info(
+        "Executing agent task on sandbox %s: prompt='%s...'", sandbox_id, request.prompt[:80]
+    )
+    task = await service.create_and_run_task(
+        sandbox_id=sandbox_id,
+        prompt=request.prompt,
+        timeout_seconds=request.timeout_seconds,
+    )
+    return AgentTaskResponse.from_model(task)
+
+
+@router.get(
+    "/{sandbox_id}/agent/tasks",
+    response_model=AgentTaskListResponse,
+    status_code=status.HTTP_200_OK,
+    responses={
+        200: {"model": AgentTaskListResponse, "description": "List of sandbox agent tasks"},
+        404: {"model": ErrorResponse, "description": "Sandbox not found"},
+    },
+    summary="List Sandbox Agent Tasks",
+    description="Retrieve all agent tasks executed in this sandbox session.",
+)
+async def list_sandbox_agent_tasks(
+    sandbox_id: uuid.UUID,
+    limit: int = Query(default=50, ge=1, le=100),
+    offset: int = Query(default=0, ge=0),
+    service: AgentOrchestratorService = Depends(get_agent_orchestrator_service),
+) -> AgentTaskListResponse:
+    """List agent tasks associated with the designated sandbox."""
+    tasks = service.list_tasks(sandbox_id=sandbox_id, limit=limit, offset=offset)
+    task_items = [AgentTaskResponse.from_model(t) for t in tasks]
+    return AgentTaskListResponse(tasks=task_items, total=len(task_items))
+
+
+@router.get(
+    "/{sandbox_id}/agent/tasks/{task_id}",
+    response_model=AgentTaskResponse,
+    status_code=status.HTTP_200_OK,
+    responses={
+        200: {"model": AgentTaskResponse, "description": "Agent task details"},
+        404: {"model": ErrorResponse, "description": "Sandbox or task not found"},
+    },
+    summary="Get Agent Task Details",
+    description="Retrieve status, iterations, tool history, and final outcome of an agent task.",
+)
+async def get_sandbox_agent_task(
+    sandbox_id: uuid.UUID,
+    task_id: uuid.UUID,
+    service: AgentOrchestratorService = Depends(get_agent_orchestrator_service),
+) -> AgentTaskResponse:
+    """Retrieve details for a specific agent task."""
+    task = service.get_task(sandbox_id=sandbox_id, task_id=task_id)
+    return AgentTaskResponse.from_model(task)
+
+
+@router.get(
+    "/{sandbox_id}/agent/tasks/{task_id}/executions",
+    response_model=list[JobExecutionResponse],
+    status_code=status.HTTP_200_OK,
+    responses={
+        200: {"description": "List of code execution jobs triggered by the task"},
+        404: {"model": ErrorResponse, "description": "Sandbox or task not found"},
+    },
+    summary="Get Agent Task Executions",
+    description="Retrieve all code execution jobs executed by the agent during the task.",
+)
+async def get_sandbox_agent_task_executions(
+    sandbox_id: uuid.UUID,
+    task_id: uuid.UUID,
+    service: AgentOrchestratorService = Depends(get_agent_orchestrator_service),
+) -> list[JobExecutionResponse]:
+    """Retrieve all execution jobs run during this task."""
+    return service.get_task_executions(sandbox_id=sandbox_id, task_id=task_id)
+
+
+@router.post(
+    "/{sandbox_id}/agent/tasks/{task_id}/cancel",
+    response_model=AgentTaskResponse,
+    status_code=status.HTTP_200_OK,
+    responses={
+        200: {"model": AgentTaskResponse, "description": "Agent task cancelled"},
+        404: {"model": ErrorResponse, "description": "Sandbox or task not found"},
+    },
+    summary="Cancel Running Agent Task",
+    description="Cancel an active in-flight or queued agent task.",
+)
+async def cancel_sandbox_agent_task(
+    sandbox_id: uuid.UUID,
+    task_id: uuid.UUID,
+    service: AgentOrchestratorService = Depends(get_agent_orchestrator_service),
+) -> AgentTaskResponse:
+    """Cancel an active agent task."""
+    task = await service.cancel_task(sandbox_id=sandbox_id, task_id=task_id)
+    return AgentTaskResponse.from_model(task)
+
 
 # ===================================================================
 # Backward Compatibility Endpoint: POST /api/v1/sandboxes/execute
 # ===================================================================
+
 
 @router.post(
     "/execute",

@@ -31,7 +31,6 @@ class ToolCallRequest(BaseModel):
     )
 
 
-
 class LLMMessage(BaseModel):
     """Normalized conversation message across all supported roles."""
 

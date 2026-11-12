@@ -1,13 +1,20 @@
 """AI Agent execution router for API v1."""
 
 import logging
+import uuid
 
 from fastapi import APIRouter, Depends, status
 
 from app.agent.agent import SandboxAgent
-from app.api.dependencies import get_sandbox_agent
-from app.schemas.agent import AgentRunRequest, AgentRunResponse
+from app.api.dependencies import get_agent_orchestrator_service, get_sandbox_agent
+from app.core.exceptions import AgentTaskNotFoundError
+from app.schemas.agent import (
+    AgentRunRequest,
+    AgentRunResponse,
+    AgentTaskResponse,
+)
 from app.schemas.errors import ErrorResponse
+from app.services.agent_orchestrator_service import AgentOrchestratorService
 
 logger = logging.getLogger(__name__)
 
@@ -70,3 +77,54 @@ async def run_agent(
         tool_calls_count=result.tool_calls_count,
         executed_tools=executed_tools,
     )
+
+
+@router.get(
+    "/tasks/{task_id}",
+    response_model=AgentTaskResponse,
+    status_code=status.HTTP_200_OK,
+    responses={
+        200: {"model": AgentTaskResponse, "description": "Agent task details"},
+        404: {"model": ErrorResponse, "description": "Agent task not found"},
+    },
+    summary="Get Agent Task Details by Task ID",
+    description="Retrieve status, iterations, tool history, and final outcome of an agent task.",
+)
+async def get_agent_task_by_id(
+    task_id: uuid.UUID,
+    service: AgentOrchestratorService = Depends(get_agent_orchestrator_service),
+) -> AgentTaskResponse:
+    """Look up an agent task directly by its unique task ID."""
+    task = service.task_repo.get_by_id(task_id)
+    if not task:
+        raise AgentTaskNotFoundError(
+            f"Agent task '{task_id}' not found.",
+            details={"task_id": str(task_id)},
+        )
+    return AgentTaskResponse.from_model(task)
+
+
+@router.post(
+    "/tasks/{task_id}/cancel",
+    response_model=AgentTaskResponse,
+    status_code=status.HTTP_200_OK,
+    responses={
+        200: {"model": AgentTaskResponse, "description": "Agent task cancelled"},
+        404: {"model": ErrorResponse, "description": "Agent task not found"},
+    },
+    summary="Cancel Agent Task by Task ID",
+    description="Cancel an active in-flight or queued agent task.",
+)
+async def cancel_agent_task_by_id(
+    task_id: uuid.UUID,
+    service: AgentOrchestratorService = Depends(get_agent_orchestrator_service),
+) -> AgentTaskResponse:
+    """Cancel an active agent task by its task ID."""
+    task = service.task_repo.get_by_id(task_id)
+    if not task:
+        raise AgentTaskNotFoundError(
+            f"Agent task '{task_id}' not found.",
+            details={"task_id": str(task_id)},
+        )
+    updated = await service.cancel_task(sandbox_id=task.sandbox_id, task_id=task_id)
+    return AgentTaskResponse.from_model(updated)

@@ -83,3 +83,24 @@ class ExecutionRepository:
             .order_by(ExecutionJob.submitted_at.desc())
         )
         return list(self.db.scalars(stmt).all())
+
+    def fail_active_jobs_for_sandbox(self, sandbox_id: uuid.UUID, error_message: str) -> int:
+        """Mark any QUEUED or RUNNING jobs for a sandbox as FAILED during recovery/cleanup."""
+        stmt = select(ExecutionJob).where(
+            ExecutionJob.sandbox_id == sandbox_id,
+            ExecutionJob.status.in_([JobStatus.QUEUED, JobStatus.RUNNING]),
+        )
+        active_jobs = list(self.db.scalars(stmt).all())
+        now = utc_now()
+        for job in active_jobs:
+            job.transition_to(JobStatus.FAILED)
+            job.completed_at = now
+            job.duration_ms = job.duration_ms or 0
+            job.error_message = error_message
+        if active_jobs:
+            try:
+                self.db.commit()
+            except Exception:
+                self.db.rollback()
+                raise
+        return len(active_jobs)

@@ -6,6 +6,12 @@ from pydantic import ValidationError
 from app.sandbox.schemas import ExecutionRequest, ExecutionResult, ExecutionStatus
 
 
+@pytest.fixture(autouse=True)
+def verify_no_container_leak():
+    """Schema unit tests do not interact with Docker."""
+    yield
+
+
 def test_valid_execution_request():
     req = ExecutionRequest(code="print('hi')", timeout_seconds=3.0)
     assert req.code == "print('hi')"

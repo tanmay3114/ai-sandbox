@@ -240,6 +240,7 @@ def test_api_agent_run_max_iterations_handled_safely(client: TestClient):
 
 def test_api_agent_run_never_leaks_secrets(client: TestClient):
     """Verify that unexpected server errors never leak environment secrets."""
+
     class CrashingProvider(LLMProvider):
         async def generate_response(
             self,

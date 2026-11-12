@@ -1,0 +1,44 @@
+# ==============================================================================
+# AI Sandbox — Dedicated Disposable Test Environment
+# ==============================================================================
+# STRICT ISOLATION NOTICE:
+# - This configuration must ONLY be used for test execution.
+# - Do not link or reference normal development or production services.
+# - Dedicated project name, network, volume, port, and labels prevent any overlap.
+# ==============================================================================
+
+name: ai-sandbox-test
+
+services:
+  test_db:
+    image: postgres:16-alpine
+    container_name: ai-sandbox-test-db
+    restart: "no"
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-ai_sandbox_test}
+      POSTGRES_USER: ${POSTGRES_USER:-sandbox_test_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-sandbox_test_pw_isolated_8472}
+    ports:
+      # Bound strictly to loopback on non-default port 5439 to avoid conflicts with dev (5435/5433)
+      - "127.0.0.1:${POSTGRES_PORT:-5439}:5432"
+    volumes:
+      - test_postgres_data:/var/lib/postgresql/data
+    networks:
+      - test_network
+    labels:
+      project: "ai-sandbox-test"
+      managed-by: "ai-sandbox-platform-test"
+      service: "ai-sandbox-test-db"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 2s
+      timeout: 2s
+      retries: 15
+
+volumes:
+  test_postgres_data:
+    name: ai-sandbox-test-postgres-data
+
+networks:
+  test_network:
+    name: ai-sandbox-test-network

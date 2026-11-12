@@ -7,7 +7,7 @@ from contextlib import AbstractContextManager, contextmanager
 
 from mcp.server.mcpserver import MCPServer
 
-from app.api.dependencies import get_sandbox_engine, get_settings
+from app.api.dependencies import get_sandbox_backend, get_settings
 from app.db.session import SessionLocal
 from app.mcp.tools import register_mcp_tools
 from app.services.sandbox_lifecycle_service import SandboxLifecycleService
@@ -23,7 +23,7 @@ def default_service_factory() -> Generator[SandboxLifecycleService, None, None]:
         service = SandboxLifecycleService(
             db=db,
             config=get_settings(),
-            engine=get_sandbox_engine(),
+            backend=get_sandbox_backend(),
         )
         yield service
     finally:

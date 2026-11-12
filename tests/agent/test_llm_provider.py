@@ -288,7 +288,6 @@ def _create_mock_gemini_response(
     )
 
 
-
 @pytest.mark.asyncio
 async def test_gemini_provider_normal_text_response(mock_gemini_client: MagicMock):
     """Test sending user message and receiving normal text response from Gemini."""
@@ -532,7 +531,6 @@ def test_llm_factory_default_provider():
     assert provider.model == cfg.LLM_MODEL
 
 
-
 @pytest.mark.asyncio
 async def test_gemini_provider_function_call_thought_signature_preserved(
     mock_gemini_client: MagicMock,
@@ -659,9 +657,7 @@ async def test_gemini_provider_sequential_tool_calls_preserve_thought_signatures
     )
 
     part2 = types.Part(
-        function_call=types.FunctionCall(
-            name="execute_code", args={"code": "print(1)"}, id="c2"
-        ),
+        function_call=types.FunctionCall(name="execute_code", args={"code": "print(1)"}, id="c2"),
         thought_signature=sig2,
     )
     tc2 = ToolCallRequest(
@@ -756,5 +752,3 @@ async def test_gemini_provider_thought_parts_alongside_function_call_preserved(
     assert model_turn.parts[0].thought_signature == thought_sig
     assert model_turn.parts[1].function_call.name == "create_sandbox"
     assert model_turn.parts[1].thought_signature == call_sig
-
-

@@ -7,13 +7,25 @@ from pydantic import ValidationError
 
 from app.agent.schemas import (
     AgentToolError,
+    CreateDirectoryInput,
     CreateSandboxInput,
+    DeleteFileInput,
     DestroySandboxInput,
     ExecuteCodeInput,
     GetExecutionResultInput,
     GetSandboxInput,
+    ListFilesInput,
+    ReadFileInput,
+    WriteFileInput,
 )
 from app.core.exceptions import SandboxPlatformError
+from app.sandbox.schemas import (
+    CreateDirectoryResponse,
+    DeleteFileResponse,
+    FileContent,
+    FileInfo,
+    FileListResponse,
+)
 from app.schemas.sandbox import (
     JobExecutionResponse,
     SandboxDetailResponse,
@@ -125,11 +137,105 @@ def destroy_sandbox_tool(
     )
 
 
+def write_file_tool(
+    service: SandboxLifecycleService,
+    input_data: WriteFileInput | dict[str, Any],
+) -> FileInfo:
+    """Tool function: create or overwrite a file in a sandbox workspace."""
+    payload = (
+        input_data
+        if isinstance(input_data, WriteFileInput)
+        else WriteFileInput.model_validate(input_data)
+    )
+    return service.write_file(
+        sandbox_id=payload.sandbox_id,
+        path=payload.path,
+        content=payload.content,
+        encoding=payload.encoding,
+    )
+
+
+def read_file_tool(
+    service: SandboxLifecycleService,
+    input_data: ReadFileInput | dict[str, Any],
+) -> FileContent:
+    """Tool function: read a file from a sandbox workspace."""
+    payload = (
+        input_data
+        if isinstance(input_data, ReadFileInput)
+        else ReadFileInput.model_validate(input_data)
+    )
+    return service.read_file(
+        sandbox_id=payload.sandbox_id,
+        path=payload.path,
+    )
+
+
+def list_files_tool(
+    service: SandboxLifecycleService,
+    input_data: ListFilesInput | dict[str, Any],
+) -> FileListResponse:
+    """Tool function: list files and directories in a sandbox workspace."""
+    payload = (
+        input_data
+        if isinstance(input_data, ListFilesInput)
+        else ListFilesInput.model_validate(input_data)
+    )
+    return service.list_files(
+        sandbox_id=payload.sandbox_id,
+        path=payload.path,
+    )
+
+
+def create_directory_tool(
+    service: SandboxLifecycleService,
+    input_data: CreateDirectoryInput | dict[str, Any],
+) -> CreateDirectoryResponse:
+    """Tool function: create a directory inside a sandbox workspace."""
+    payload = (
+        input_data
+        if isinstance(input_data, CreateDirectoryInput)
+        else CreateDirectoryInput.model_validate(input_data)
+    )
+    created = service.create_directory(
+        sandbox_id=payload.sandbox_id,
+        path=payload.path,
+    )
+    return CreateDirectoryResponse(path=payload.path, created=created)
+
+
+def delete_file_tool(
+    service: SandboxLifecycleService,
+    input_data: DeleteFileInput | dict[str, Any],
+) -> DeleteFileResponse:
+    """Tool function: delete a file or empty directory inside a sandbox workspace."""
+    payload = (
+        input_data
+        if isinstance(input_data, DeleteFileInput)
+        else DeleteFileInput.model_validate(input_data)
+    )
+    deleted = service.delete_file(
+        sandbox_id=payload.sandbox_id,
+        path=payload.path,
+    )
+    return DeleteFileResponse(path=payload.path, deleted=deleted)
+
+
 async def execute_agent_tool(
     tool_name: str,
     arguments: dict[str, Any],
     service: SandboxLifecycleService,
-) -> SandboxResponse | SandboxDetailResponse | JobExecutionResponse | AgentToolError:
+) -> (
+    SandboxResponse
+    | SandboxDetailResponse
+    | JobExecutionResponse
+    | FileInfo
+    | FileContent
+    | FileListResponse
+    | CreateDirectoryResponse
+    | DeleteFileResponse
+    | AgentToolError
+):
     """Generic dispatcher executing agent tool calls with deterministic error wrapping."""
     try:
         match tool_name:
@@ -143,6 +249,16 @@ async def execute_agent_tool(
                 return get_sandbox_tool(service, arguments)
             case "destroy_sandbox":
                 return destroy_sandbox_tool(service, arguments)
+            case "write_file" | "sandbox_write_file":
+                return write_file_tool(service, arguments)
+            case "read_file" | "sandbox_read_file":
+                return read_file_tool(service, arguments)
+            case "list_files" | "sandbox_list_files":
+                return list_files_tool(service, arguments)
+            case "create_directory" | "sandbox_create_directory":
+                return create_directory_tool(service, arguments)
+            case "delete_file" | "sandbox_delete_file":
+                return delete_file_tool(service, arguments)
             case _:
                 return AgentToolError(
                     error="InvalidToolName",
@@ -154,6 +270,11 @@ async def execute_agent_tool(
                             "get_execution_result",
                             "get_sandbox",
                             "destroy_sandbox",
+                            "write_file",
+                            "read_file",
+                            "list_files",
+                            "create_directory",
+                            "delete_file",
                         ]
                     },
                 )

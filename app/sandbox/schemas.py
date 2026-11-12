@@ -1,6 +1,8 @@
 """Pydantic schemas and enums for sandbox requests and execution results."""
 
+from datetime import datetime
 from enum import StrEnum
+from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -78,3 +80,66 @@ class ExecutionResult(BaseModel):
         None,
         description="Internal error description if status is ERROR",
     )
+
+
+class FileInfo(BaseModel):
+    """Metadata describing a file or directory inside a sandbox workspace."""
+
+    path: str = Field(..., description="Workspace-relative POSIX path")
+    size_bytes: int = Field(..., ge=0, description="Size in bytes")
+    is_directory: bool = Field(..., description="True if entry is a directory")
+    modified_at: datetime = Field(..., description="Last modification timestamp (UTC)")
+
+
+class FileContent(BaseModel):
+    """File content and encoding retrieved from a sandbox workspace."""
+
+    path: str = Field(..., description="Workspace-relative POSIX path")
+    content: str = Field(..., description="File content (plain text or base64)")
+    encoding: Literal["utf-8", "base64"] = Field(
+        default="utf-8", description="Content encoding ('utf-8' or 'base64')"
+    )
+    size_bytes: int = Field(..., ge=0, description="Size in bytes")
+
+
+class WriteFileRequest(BaseModel):
+    """Payload for creating or overwriting a file in the workspace."""
+
+    path: str = Field(..., min_length=1, max_length=255, description="Workspace-relative path")
+    content: str = Field(
+        ...,
+        max_length=70 * 1024 * 1024,
+        description="File content (plain text or base64)",
+    )
+    encoding: str = Field(
+        default="utf-8",
+        description="Content encoding format ('utf-8' or 'base64')",
+    )
+
+
+class CreateDirectoryRequest(BaseModel):
+    """Payload for creating a directory in the workspace."""
+
+    path: str = Field(..., min_length=1, max_length=255, description="Workspace-relative path")
+
+
+class CreateDirectoryResponse(BaseModel):
+    """Structured result for directory creation in a sandbox workspace."""
+
+    path: str = Field(..., description="Workspace-relative POSIX path")
+    created: bool = Field(..., description="True if directory was newly created")
+
+
+class DeleteFileResponse(BaseModel):
+    """Structured result for file or empty directory deletion in a sandbox workspace."""
+
+    path: str = Field(..., description="Workspace-relative POSIX path")
+    deleted: bool = Field(..., description="True if entry was deleted")
+
+
+class FileListResponse(BaseModel):
+    """Directory listing result with aggregated summary metadata."""
+
+    files: list[FileInfo] = Field(default_factory=list, description="List of workspace entries")
+    total_count: int = Field(..., ge=0, description="Total entries in this listing")
+    total_size_bytes: int = Field(..., ge=0, description="Total size in bytes across listed files")

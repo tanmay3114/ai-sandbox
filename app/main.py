@@ -8,17 +8,24 @@ from fastapi import FastAPI, Request, status
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
+from app.api.dependencies import get_sandbox_backend
 from app.api.health import router as health_router
 from app.api.v1.router import api_v1_router
 from app.core.exceptions import (
+    AgentCancelledError,
     AgentMaxIterationsError,
+    AgentSecurityError,
+    AgentTaskNotFoundError,
     AgentTimeoutError,
     ConcurrencyLimitError,
     DockerEngineError,
     ExecutionNotFoundError,
     LLMProviderError,
+    QemuEngineError,
+    SandboxFileNotFoundError,
     SandboxNotFoundError,
     SandboxPlatformError,
+    WorkspaceCleanupError,
 )
 from app.db.session import SessionLocal
 from app.models.sandbox import InvalidStateTransitionError
@@ -31,19 +38,46 @@ logging.basicConfig(
 )
 logger = logging.getLogger("ai_sandbox")
 
+
 @asynccontextmanager
 async def lifespan(_: FastAPI):
-    """Reconcile persisted lifecycle state left by a prior process on startup."""
+    """Reconcile persisted lifecycle state on startup and handle graceful shutdown."""
+    from app.services.agent_orchestrator_service import AgentOrchestratorService
+
+    AgentOrchestratorService._shutting_down = False
     db = SessionLocal()
     try:
-        SandboxLifecycleService(db=db).reconcile_stale_sandboxes()
+        from app.services.agent_orchestrator_service import AgentOrchestratorService
+
+        lifecycle_svc = SandboxLifecycleService(
+            db=db,
+            backend=get_sandbox_backend(),
+        )
+        lifecycle_svc.reconcile_stale_sandboxes()
+        AgentOrchestratorService(
+            db=db,
+            service=lifecycle_svc,
+            llm_provider=None,
+        ).reconcile_interrupted_tasks()
     except Exception:
         # Startup recovery is best-effort; readiness remains responsible for
         # reporting unavailable dependencies without exposing their details.
-        logger.exception("Sandbox lifecycle recovery could not complete")
+        logger.exception("Startup lifecycle recovery could not complete")
     finally:
         db.close()
+
     yield
+
+    # Graceful shutdown: stop new tasks, signal active orchestrator loops, await completion
+    shutdown_db = SessionLocal()
+    try:
+        from app.services.agent_orchestrator_service import AgentOrchestratorService
+
+        await AgentOrchestratorService.graceful_shutdown(db=shutdown_db, timeout_seconds=3.0)
+    except Exception:
+        logger.exception("Agent orchestrator graceful shutdown encountered error")
+    finally:
+        shutdown_db.close()
 
 
 app = FastAPI(
@@ -69,6 +103,7 @@ Secure, isolated, ephemeral execution environment platform for untrusted AI agen
 # ==========================================
 # Centralized Exception Handlers
 # ==========================================
+
 
 @app.exception_handler(ConcurrencyLimitError)
 async def concurrency_limit_handler(
@@ -99,6 +134,40 @@ async def docker_engine_handler(
         content={
             "error": "DockerEngineError",
             "message": "Sandbox container infrastructure is temporarily unavailable.",
+            "details": {},
+        },
+    )
+
+
+@app.exception_handler(QemuEngineError)
+async def qemu_engine_handler(
+    request: Request,
+    exc: QemuEngineError,
+) -> JSONResponse:
+    """Handle QEMU virtualization infrastructure failures without leaking internals."""
+    logger.error(f"QemuEngineError on request {request.url.path}: {exc}")
+    return JSONResponse(
+        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+        content={
+            "error": "QemuEngineError",
+            "message": "Sandbox virtualization infrastructure is temporarily unavailable.",
+            "details": {},
+        },
+    )
+
+
+@app.exception_handler(WorkspaceCleanupError)
+async def workspace_cleanup_handler(
+    request: Request,
+    exc: WorkspaceCleanupError,
+) -> JSONResponse:
+    """Handle workspace cleanup failures as retryable 503 errors without leaking host paths."""
+    logger.error(f"WorkspaceCleanupError on request {request.url.path}: {type(exc).__name__}")
+    return JSONResponse(
+        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+        content={
+            "error": "WorkspaceCleanupError",
+            "message": "Sandbox workspace cleanup failed and remains retryable.",
             "details": {},
         },
     )
@@ -137,6 +206,22 @@ async def execution_not_found_handler(
         },
     )
 
+
+@app.exception_handler(SandboxFileNotFoundError)
+async def sandbox_file_not_found_handler(
+    request: Request,
+    exc: SandboxFileNotFoundError,
+) -> JSONResponse:
+    """Handle 404 for missing workspace files or directories without leaking host paths."""
+    logger.info(f"SandboxFileNotFoundError: {exc.message}")
+    return JSONResponse(
+        status_code=status.HTTP_404_NOT_FOUND,
+        content={
+            "error": "SandboxFileNotFoundError",
+            "message": exc.message,
+            "details": exc.details,
+        },
+    )
 
 
 @app.exception_handler(InvalidStateTransitionError)
@@ -203,6 +288,57 @@ async def llm_provider_handler(
             "error": "LLMProviderError",
             "message": "AI model provider communication failed.",
             "details": {},
+        },
+    )
+
+
+@app.exception_handler(AgentSecurityError)
+async def agent_security_handler(
+    request: Request,
+    exc: AgentSecurityError,
+) -> JSONResponse:
+    """Handle cross-sandbox or unauthorized agent tool execution attempt."""
+    logger.warning("AgentSecurityError on %s: %s", request.url.path, exc.message)
+    return JSONResponse(
+        status_code=status.HTTP_403_FORBIDDEN,
+        content={
+            "error": "AgentSecurityError",
+            "message": exc.message,
+            "details": exc.details,
+        },
+    )
+
+
+@app.exception_handler(AgentTaskNotFoundError)
+async def agent_task_not_found_handler(
+    request: Request,
+    exc: AgentTaskNotFoundError,
+) -> JSONResponse:
+    """Handle non-existent agent task lookup."""
+    logger.info("AgentTaskNotFoundError on %s: %s", request.url.path, exc.message)
+    return JSONResponse(
+        status_code=status.HTTP_404_NOT_FOUND,
+        content={
+            "error": "AgentTaskNotFoundError",
+            "message": exc.message,
+            "details": exc.details,
+        },
+    )
+
+
+@app.exception_handler(AgentCancelledError)
+async def agent_cancelled_handler(
+    request: Request,
+    exc: AgentCancelledError,
+) -> JSONResponse:
+    """Handle cancelled agent task execution."""
+    logger.info("AgentCancelledError on %s: %s", request.url.path, exc.message)
+    return JSONResponse(
+        status_code=status.HTTP_409_CONFLICT,
+        content={
+            "error": "AgentCancelledError",
+            "message": exc.message,
+            "details": exc.details,
         },
     )
 

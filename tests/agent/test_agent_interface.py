@@ -8,22 +8,32 @@ from pydantic import ValidationError
 from app.agent.schemas import (
     AGENT_TOOLS,
     AgentToolError,
+    CreateDirectoryInput,
     CreateSandboxInput,
+    DeleteFileInput,
     DestroySandboxInput,
     ExecuteCodeInput,
     GetExecutionResultInput,
     GetSandboxInput,
+    ListFilesInput,
+    ReadFileInput,
+    WriteFileInput,
 )
 
 
 def test_agent_tool_catalog_contains_all_five_tools():
-    """Verify that AGENT_TOOLS declares all 5 minimum conceptual operations."""
+    """Verify that AGENT_TOOLS declares the 5 core lifecycle tools and 5 workspace tools."""
     expected_tools = {
         "create_sandbox",
         "execute_code",
         "get_execution_result",
         "get_sandbox",
         "destroy_sandbox",
+        "write_file",
+        "read_file",
+        "list_files",
+        "create_directory",
+        "delete_file",
     }
     assert set(AGENT_TOOLS.keys()) == expected_tools
 
@@ -62,7 +72,6 @@ def test_execute_code_input_validation():
 
     with pytest.raises(ValidationError):
         ExecuteCodeInput(sandbox_id=uuid.uuid4(), code="   \t\n ")
-
 
     with pytest.raises(ValidationError):
         ExecuteCodeInput(sandbox_id=uuid.uuid4(), code="pass", timeout_seconds=0.1)
@@ -104,3 +113,30 @@ def test_agent_tool_error_schema():
     assert err.error == "SandboxNotFoundError"
     assert err.message == "Sandbox does not exist."
     assert err.details["sandbox_id"] == "test-id"
+
+
+def test_workspace_tool_input_validation():
+    """Test valid and invalid workspace tool input schemas."""
+    s_id = uuid.uuid4()
+
+    w_in = WriteFileInput(sandbox_id=s_id, path="app/main.py", content="print(1)")
+    assert w_in.path == "app/main.py"
+    assert w_in.encoding == "utf-8"
+
+    r_in = ReadFileInput(sandbox_id=s_id, path="app/main.py")
+    assert r_in.path == "app/main.py"
+
+    l_in = ListFilesInput(sandbox_id=s_id)
+    assert l_in.path == ""
+
+    d_in = CreateDirectoryInput(sandbox_id=s_id, path="app/sub")
+    assert d_in.path == "app/sub"
+
+    del_in = DeleteFileInput(sandbox_id=s_id, path="app/main.py")
+    assert del_in.path == "app/main.py"
+
+    with pytest.raises(ValidationError):
+        WriteFileInput(sandbox_id=s_id, path="", content="x")
+
+    with pytest.raises(ValidationError):
+        ReadFileInput(sandbox_id="not-a-uuid", path="file.txt")
