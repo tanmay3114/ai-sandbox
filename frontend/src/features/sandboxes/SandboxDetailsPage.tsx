@@ -250,6 +250,31 @@ export function SandboxDetailsPage() {
         </div>
       </div>
 
+      {/* Architecture Context Banner */}
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 10,
+          padding: "10px 14px",
+          borderRadius: 6,
+          backgroundColor: "var(--color-surface-2)",
+          border: "1px solid var(--color-border-subtle)",
+          marginBottom: 16,
+          fontSize: 12,
+          color: "var(--color-text-muted)",
+        }}
+      >
+        <span style={{ fontWeight: 600, color: "var(--color-text-secondary)" }}>
+          Architecture:
+        </span>
+        <span>
+          <strong>Logical Sandbox:</strong> Persistent session record &amp; state tracking ·{" "}
+          <strong>Workspace:</strong> Dedicated isolated host volume ·{" "}
+          <strong>Execution Runtime:</strong> On-demand ephemeral runner
+        </span>
+      </div>
+
       {/* Metadata Cards Grid */}
       <div
         style={{
@@ -274,7 +299,7 @@ export function SandboxDetailsPage() {
             {sandbox.runtime}
           </div>
           <div style={{ fontSize: 11, color: "var(--color-text-muted)", marginTop: 2 }}>
-            Pinned execution container
+            Configured execution container
           </div>
         </div>
 
@@ -294,6 +319,25 @@ export function SandboxDetailsPage() {
           </div>
           <div style={{ fontSize: 11, color: "var(--color-text-muted)", marginTop: 4 }}>
             Expires: {formatDate(sandbox.expires_at)}
+          </div>
+        </div>
+
+        <div
+          style={{
+            backgroundColor: "var(--color-surface)",
+            border: "1px solid var(--color-border-subtle)",
+            borderRadius: 8,
+            padding: "16px 18px",
+          }}
+        >
+          <div style={{ fontSize: 11, color: "var(--color-text-muted)", marginBottom: 4, textTransform: "uppercase", letterSpacing: "0.04em" }}>
+            Backend Architecture
+          </div>
+          <div style={{ fontSize: 14, fontWeight: 600, color: "var(--color-text-primary)" }}>
+            Configured Runtime
+          </div>
+          <div style={{ fontSize: 11, color: "var(--color-text-muted)", marginTop: 2 }}>
+            Logical session · ephemeral container per execution
           </div>
         </div>
 
