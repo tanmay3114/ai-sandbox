@@ -20,6 +20,7 @@ import { ExecutionList } from "@/features/executions/components/ExecutionList";
 import { ExecutionOutput } from "@/features/executions/components/ExecutionOutput";
 import { useExecuteCode } from "@/features/executions/hooks/useExecutions";
 import { WorkspaceExplorer } from "@/features/workspace";
+import { SandboxAgentWorkspace } from "./components/agent/SandboxAgentWorkspace";
 
 export function SandboxDetailsPage() {
   const { sandboxId } = useParams<{ sandboxId: string }>();
@@ -406,6 +407,12 @@ export function SandboxDetailsPage() {
 
       {/* Persistent Workspace Files & Editor */}
       <WorkspaceExplorer
+        sandboxId={sandbox.sandbox_id}
+        isSandboxRunning={isRunnable}
+      />
+
+      {/* Autonomous Agent Orchestration */}
+      <SandboxAgentWorkspace
         sandboxId={sandbox.sandbox_id}
         isSandboxRunning={isRunnable}
       />
