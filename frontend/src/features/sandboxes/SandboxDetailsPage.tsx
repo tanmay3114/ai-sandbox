@@ -19,6 +19,7 @@ import { CodeEditor } from "@/features/executions/components/CodeEditor";
 import { ExecutionList } from "@/features/executions/components/ExecutionList";
 import { ExecutionOutput } from "@/features/executions/components/ExecutionOutput";
 import { useExecuteCode } from "@/features/executions/hooks/useExecutions";
+import { WorkspaceExplorer } from "@/features/workspace";
 
 export function SandboxDetailsPage() {
   const { sandboxId } = useParams<{ sandboxId: string }>();
@@ -402,6 +403,12 @@ export function SandboxDetailsPage() {
           </div>
         </Link>
       </div>
+
+      {/* Persistent Workspace Files & Editor */}
+      <WorkspaceExplorer
+        sandboxId={sandbox.sandbox_id}
+        isSandboxRunning={isRunnable}
+      />
 
       {/* Code Runner Workspace */}
       <div style={{ marginBottom: 24, display: "flex", flexDirection: "column", gap: 16 }}>
