@@ -7,6 +7,8 @@ import { ExecutionDetailPage } from "@/features/executions/pages/ExecutionDetail
 import { AgentPage } from "@/features/agent/pages/AgentPage";
 import { Security } from "@/pages/Security";
 import { SandboxDetailsPage } from "@/features/sandboxes/SandboxDetailsPage";
+import { HistoryPage } from "@/features/history";
+import { BenchmarkPage } from "@/features/benchmarks";
 
 export function AppRoutes() {
   return (
@@ -36,8 +38,14 @@ export function AppRoutes() {
           element={<ExecutionDetailPage />}
         />
 
+        {/* History */}
+        <Route path="/dashboard/history" element={<HistoryPage />} />
+
         {/* Agent */}
         <Route path="/dashboard/agent" element={<AgentPage />} />
+
+        {/* Benchmarks */}
+        <Route path="/dashboard/benchmarks" element={<BenchmarkPage />} />
 
         {/* Security */}
         <Route path="/dashboard/security" element={<Security />} />

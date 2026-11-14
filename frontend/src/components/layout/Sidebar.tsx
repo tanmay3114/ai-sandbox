@@ -1,8 +1,10 @@
 import {
   Bot,
   Container,
+  History,
   LayoutDashboard,
   PlaySquare,
+  Scale,
   Shield,
 } from "lucide-react";
 import { NavLink } from "react-router-dom";
@@ -12,7 +14,9 @@ const NAV_ITEMS = [
   { to: "/dashboard", label: "Dashboard", icon: LayoutDashboard, end: true },
   { to: "/dashboard/sandboxes", label: "Sandboxes", icon: Container },
   { to: "/dashboard/executions", label: "Executions", icon: PlaySquare },
+  { to: "/dashboard/history", label: "History", icon: History },
   { to: "/dashboard/agent", label: "Agent", icon: Bot },
+  { to: "/dashboard/benchmarks", label: "Benchmarks", icon: Scale },
   { to: "/dashboard/security", label: "Security", icon: Shield },
 ];
 
