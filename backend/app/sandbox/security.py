@@ -5,7 +5,7 @@ from typing import Any
 import docker.types
 
 from app.core.config import SandboxSettings, settings
-from app.security.policy import EffectiveSandboxPolicy
+from app.sandbox.policy import EffectiveSandboxPolicy
 
 
 def build_container_parameters(
@@ -14,38 +14,81 @@ def build_container_parameters(
     config: SandboxSettings = settings,
     policy: EffectiveSandboxPolicy | None = None,
 ) -> dict[str, Any]:
-    """Construct hardened Docker container parameters.
+    """Translate a validated provider-neutral policy into Docker controls.
 
-    Derives container parameters strictly from an immutable EffectiveSandboxPolicy.
-    If no policy is provided, instantiates the default trusted platform policy.
+    Security controls:
+    1. Privilege: non-root user (10001:10001), cap_drop ALL, no-new-privileges, unprivileged.
+    2. Filesystem: read_only root filesystem, restricted tmpfs at /tmp, 0 host mounts.
+    3. Network: network_mode='none' (completely isolated network stack).
+    4. Compute: strict memory limit, memory+swap limit, nano_cpus, pids_limit.
+    5. Environment: minimal sanitized env vars; zero host environment or secrets forwarded.
+    6. Command: strict argument vector ["python", "-c", code] avoiding shell evaluation.
+    7. Ownership: metadata labels for project-scoped lifecycle tracking.
     """
-    if policy is None:
-        from app.security.engine import SecurityPolicyEngine
+    effective_policy = policy or EffectiveSandboxPolicy.from_settings(config)
+    effective_policy.validate()
 
-        policy = SecurityPolicyEngine(config=config).get_default_policy()
+    if not (
+        effective_policy.network_disabled
+        and not effective_policy.privileged
+        and effective_policy.drop_all_capabilities
+        and effective_policy.no_new_privileges
+        and effective_policy.read_only_rootfs
+        and not effective_policy.host_mounts_allowed
+        and not effective_policy.host_environment_allowed
+    ):
+        raise ValueError("Docker backend cannot weaken mandatory sandbox policy controls")
+
+    fsize_limit = min(
+        effective_policy.max_file_size_bytes,
+        effective_policy.max_workspace_size_bytes,
+    )
 
     return {
-        "image": policy.image,
+        "image": effective_policy.image,
         "command": ["python", "-c", code],
         "detach": True,
+        "working_dir": "/workspace",
         # Compute & Memory bounds
-        "mem_limit": policy.memory_limit,
-        "memswap_limit": policy.memswap_limit,
-        "nano_cpus": policy.nano_cpus,
-        "pids_limit": policy.pids_limit,
+        "mem_limit": effective_policy.memory_limit,
+        "memswap_limit": effective_policy.memswap_limit,
+        "nano_cpus": effective_policy.nano_cpus,
+        "pids_limit": effective_policy.pids_limit,
+        # Kernel-enforced execution-time file size ceiling (RLIMIT_FSIZE)
+        "ulimits": [
+            docker.types.Ulimit(
+                name="fsize",
+                soft=fsize_limit,
+                hard=fsize_limit,
+            ),
+        ],
         # Network confinement
-        "network_mode": policy.network_mode,
+        "network_mode": "none",
         # Privilege confinement
-        "privileged": policy.privileged,
-        "cap_drop": list(policy.cap_drop),
-        "security_opt": list(policy.security_opt),
-        "user": policy.user,
+        "privileged": effective_policy.privileged,
+        "cap_drop": ["ALL"],
+        "security_opt": ["no-new-privileges:true"],
+        "user": effective_policy.run_as_user,
         # Filesystem isolation
-        "read_only": policy.read_only,
-        "tmpfs": dict(policy.tmpfs),
-        "volumes": dict(policy.volumes),  # Strictly empty - no host directory or docker.sock mounts
+        "read_only": effective_policy.read_only_rootfs,
+        "tmpfs": {
+            "/tmp": f"size={effective_policy.tmpfs_size},noexec,nosuid,nodev",
+        },
+        "mounts": [
+            docker.types.Mount(
+                target="/workspace",
+                source=None,
+                type="volume",
+                no_copy=True,
+            ),
+        ],
+        "volumes": {},  # Strictly empty - no host directory or docker.sock mounts
         # Sanitized container environment
-        "environment": dict(policy.environment),
+        "environment": {
+            "PYTHONDONTWRITEBYTECODE": "1",
+            "PYTHONUNBUFFERED": "1",
+            "HOME": "/workspace",
+        },
         # Logging bounds to protect Docker host disk space
         "log_config": docker.types.LogConfig(
             type=docker.types.LogConfig.types.JSON,
@@ -53,8 +96,8 @@ def build_container_parameters(
         ),
         # Platform tracking metadata
         "labels": {
-            "project": policy.project_label,
-            "managed-by": policy.managed_by_label,
+            "project": config.PROJECT_LABEL,
+            "managed-by": config.MANAGED_BY_LABEL,
             "sandbox_id": sandbox_id,
         },
     }

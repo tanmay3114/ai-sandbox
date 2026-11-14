@@ -66,16 +66,29 @@ def list_sandbox_containers(
     ]
 
 
+def _is_container_active(container: Container) -> bool:
+    """Return True if the container's reloaded State indicates it is still running/active."""
+    attrs = getattr(container, "attrs", None)
+    if not isinstance(attrs, dict):
+        return False
+    state = attrs.get("State")
+    if not isinstance(state, dict):
+        return False
+    return bool(state.get("Running") or state.get("Paused") or state.get("Restarting"))
+
+
 def cleanup_container_safely(
     container: Container | None,
-    sandbox_id: str | None = None,
+    sandbox_id: str,
+    config: SandboxSettings,
 ) -> bool:
-    """Safely and idempotently terminate and remove an ephemeral container.
+    """Safely and idempotently terminate and remove an ephemeral container and volumes.
 
     Guarantees:
     - Only operates if container object is valid.
     - Double checks project labels before any destructive action.
     - Never terminates infrastructure services (e.g. ai-sandbox-db).
+    - Verifies the container is stopped before removing container and anonymous volumes.
     - Idempotently ignores NotFound exceptions.
     """
     if container is None:
@@ -84,13 +97,23 @@ def cleanup_container_safely(
     cid = container.id[:12] if hasattr(container, "id") and container.id else "unknown"
 
     try:
-        # Reload latest attributes
+        # Reloaded labels are the only source of authority for destructive operations.
         try:
             container.reload()
             labels = container.attrs.get("Config", {}).get("Labels", {})
-            if labels.get("project") != settings.PROJECT_LABEL:
+            if labels.get("project") != config.PROJECT_LABEL:
                 logger.warning(
-                    f"Refusing to delete container {cid}: label != {settings.PROJECT_LABEL}"
+                    f"Refusing to delete container {cid}: project ownership does not match"
+                )
+                return False
+            if labels.get("managed-by") != config.MANAGED_BY_LABEL:
+                logger.warning(
+                    f"Refusing to delete container {cid}: manager ownership does not match"
+                )
+                return False
+            if labels.get("sandbox_id") != sandbox_id:
+                logger.warning(
+                    f"Refusing to delete container {cid}: sandbox ownership does not match"
                 )
                 return False
             if labels.get("service") == "ai-sandbox-db":
@@ -99,25 +122,59 @@ def cleanup_container_safely(
         except NotFound:
             # Already removed
             return True
-        except Exception:
-            pass  # If reload fails, continue with removal attempt
+        except Exception as exc:
+            logger.error(f"Refusing to delete container {cid}: ownership reload failed: {exc}")
+            return False
 
-        # If still running, kill it first
+        # Terminate container and verify it is stopped before removing anonymous volumes.
+        kill_error: Exception | None = None
         try:
             container.kill()
-        except (NotFound, APIError):
-            # Already stopped, killed, or not found
-            pass
+        except NotFound:
+            return True
+        except Exception as exc:
+            msg = str(exc).lower()
+            if "not running" not in msg and "no such container" not in msg:
+                kill_error = exc
 
-        # Force remove container
+        if _is_container_active(container) or kill_error is not None:
+            try:
+                container.reload()
+            except NotFound:
+                return True
+            except Exception as exc:
+                logger.error(f"Failed to reload container {cid} after kill attempt: {exc}")
+                return False
+
+            if _is_container_active(container):
+                try:
+                    container.stop(timeout=0)
+                    container.reload()
+                except NotFound:
+                    return True
+                except Exception as exc:
+                    logger.error(f"Failed to stop running container {cid}: {exc}")
+                    return False
+
+                if _is_container_active(container):
+                    logger.error(
+                        f"Refusing to remove volumes for {cid}: container is still running"
+                    )
+                    return False
+            elif kill_error is not None and not isinstance(container.attrs.get("State"), dict):
+                logger.error(f"Failed to terminate container {cid}: {kill_error}")
+                return False
+
+        # Remove stopped container and any anonymous container-scoped volumes.
+        # Never fall back to removing without `v=True`, which would leak anonymous volumes.
         try:
-            container.remove(force=True)
+            container.remove(v=True, force=True)
             logger.info(f"Container {cid} (sandbox_id={sandbox_id}) successfully removed.")
             return True
         except NotFound:
             return True
-        except APIError as exc:
-            logger.error(f"Failed to remove container {cid}: {exc}")
+        except Exception as exc:
+            logger.error(f"Failed to remove container and volumes for {cid}: {exc}")
             return False
 
     except Exception as exc:

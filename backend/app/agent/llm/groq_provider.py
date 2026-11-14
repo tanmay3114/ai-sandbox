@@ -37,8 +37,7 @@ class GroqProvider(LLMProvider):
         else:
             if not api_key:
                 raise LLMProviderError(
-                    "Groq API key is required. "
-                    "Set SANDBOX_GROQ_API_KEY or pass api_key explicitly."
+                    "Groq API key is required. Set SANDBOX_GROQ_API_KEY or pass api_key explicitly."
                 )
             self._client = AsyncOpenAI(
                 api_key=api_key,

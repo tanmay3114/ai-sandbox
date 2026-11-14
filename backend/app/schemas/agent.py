@@ -1,5 +1,9 @@
 """Request and response schemas for AI Agent REST APIs."""
 
+import uuid
+from datetime import datetime
+from typing import Any
+
 from pydantic import BaseModel, Field, field_validator
 
 
@@ -49,3 +53,85 @@ class AgentRunResponse(BaseModel):
         default_factory=list,
         description="Names of tools executed during the run in chronological order",
     )
+
+
+class AgentTaskCreateRequest(BaseModel):
+    """Request payload for creating and executing an agent orchestration task."""
+
+    prompt: str = Field(
+        ...,
+        min_length=1,
+        max_length=10000,
+        description="Natural-language coding, execution, or file task for the agent",
+        examples=["Create a fibonacci script, execute it, and explain output."],
+    )
+    timeout_seconds: float | None = Field(
+        default=None,
+        ge=1.0,
+        le=300.0,
+        description="Optional timeout override in seconds for task orchestration",
+    )
+
+    @field_validator("prompt")
+    @classmethod
+    def validate_prompt(cls, v: str) -> str:
+        clean = v.strip()
+        if not clean:
+            raise ValueError("Task prompt cannot be empty or solely whitespace.")
+        return clean
+
+
+class AgentTaskResponse(BaseModel):
+    """Structured response representing an agent orchestration task entity."""
+
+    task_id: uuid.UUID = Field(..., description="Unique task identifier")
+    sandbox_id: uuid.UUID = Field(..., description="Associated sandbox session UUID")
+    task_description: str = Field(..., description="Original task prompt/description")
+    status: str = Field(..., description="Current task status (pending, running, completed, etc.)")
+    iterations: int = Field(default=0, description="Reasoning iterations completed")
+    tool_calls_count: int = Field(default=0, description="Total tool calls performed")
+    result_summary: str | None = Field(
+        default=None, description="Final natural-language explanation"
+    )
+    error_message: str | None = Field(default=None, description="Error message if task failed")
+    error_type: str | None = Field(default=None, description="Classification of error if failed")
+    tool_history: list[dict[str, Any]] = Field(
+        default_factory=list, description="Structured tool history"
+    )
+    cancellation_requested_at: datetime | None = Field(
+        default=None, description="Timestamp when cancellation was requested"
+    )
+    interruption_reason: str | None = Field(
+        default=None, description="Reason if task was interrupted by restart or shutdown"
+    )
+    created_at: datetime = Field(..., description="Timestamp of task creation")
+    started_at: datetime | None = Field(default=None, description="Timestamp when task started")
+    completed_at: datetime | None = Field(default=None, description="Timestamp when task finished")
+
+    @classmethod
+    def from_model(cls, task: Any) -> "AgentTaskResponse":
+        """Construct response DTO from an AgentTask persistent model."""
+        return cls(
+            task_id=task.id,
+            sandbox_id=task.sandbox_id,
+            task_description=task.task_description,
+            status=str(task.status),
+            iterations=task.iterations,
+            tool_calls_count=task.tool_calls_count,
+            result_summary=task.result_summary,
+            error_message=task.error_message,
+            error_type=task.error_type,
+            tool_history=task.tool_history,
+            cancellation_requested_at=task.cancellation_requested_at,
+            interruption_reason=task.interruption_reason,
+            created_at=task.created_at,
+            started_at=task.started_at,
+            completed_at=task.completed_at,
+        )
+
+
+class AgentTaskListResponse(BaseModel):
+    """Paginated list of agent orchestration tasks."""
+
+    tasks: list[AgentTaskResponse] = Field(default_factory=list)
+    total: int = Field(default=0)

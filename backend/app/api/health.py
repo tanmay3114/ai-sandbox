@@ -2,11 +2,11 @@
 
 import logging
 
-import docker
 from fastapi import APIRouter, Depends, status
 from fastapi.responses import JSONResponse
 
-from app.api.dependencies import get_docker_client_dependency
+from app.api.dependencies import get_sandbox_backend
+from app.sandbox.backend import SandboxBackend
 from app.schemas.health import HealthResponse, ReadyResponse
 
 logger = logging.getLogger(__name__)
@@ -39,11 +39,11 @@ async def health() -> HealthResponse:
     ),
 )
 async def ready(
-    docker_client: docker.DockerClient = Depends(get_docker_client_dependency),
+    backend: SandboxBackend = Depends(get_sandbox_backend),
 ) -> JSONResponse:
     """Check readiness by verifying Docker Engine connectivity."""
     try:
-        docker_client.ping()
+        backend.check_health()
         return JSONResponse(
             status_code=status.HTTP_200_OK,
             content={"status": "ready", "docker": "connected"},

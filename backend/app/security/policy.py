@@ -107,9 +107,7 @@ class FrozenDict(dict):
         return self
 
     @classmethod
-    def __get_pydantic_core_schema__(
-        cls, source_type: Any, handler: Any
-    ) -> CoreSchema:
+    def __get_pydantic_core_schema__(cls, source_type: Any, handler: Any) -> CoreSchema:
         return core_schema.no_info_after_validator_function(
             cls,
             core_schema.dict_schema(),
