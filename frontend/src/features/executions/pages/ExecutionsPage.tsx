@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import {
   Container,
   ExternalLink,
@@ -26,20 +26,17 @@ export function ExecutionsPage() {
     isLoading: isSandboxesLoading,
   } = useSandboxes();
 
-  // Active selected sandbox
-  const [selectedSandboxId, setSelectedSandboxId] = useState<string>("");
+  // Active selected sandbox: derive initial state from URL or first available sandbox
+  const initialSandboxId =
+    urlSandboxId ||
+    (sandboxes && sandboxes.length > 0
+      ? (sandboxes.find((s) => s.status === "running") ?? sandboxes[0]).sandbox_id
+      : "");
 
-  // Keep state in sync with URL param or first available sandbox
-  useEffect(() => {
-    if (urlSandboxId) {
-      setSelectedSandboxId(urlSandboxId);
-    } else if (sandboxes && sandboxes.length > 0 && !selectedSandboxId) {
-      // Pick the first running sandbox or first available
-      const activeSb =
-        sandboxes.find((s) => s.status === "running") ?? sandboxes[0];
-      setSelectedSandboxId(activeSb.sandbox_id);
-    }
-  }, [urlSandboxId, sandboxes, selectedSandboxId]);
+  const [selectedSandboxId, setSelectedSandboxId] = useState<string>(initialSandboxId);
+
+  // Keep state synchronized only when user navigation overrides URL param
+  const activeSandboxId = urlSandboxId || selectedSandboxId || (sandboxes?.[0]?.sandbox_id ?? "");
 
   const handleSelectSandbox = (id: string) => {
     setSelectedSandboxId(id);
@@ -47,7 +44,7 @@ export function ExecutionsPage() {
   };
 
   const selectedSandbox = sandboxes?.find(
-    (s: SandboxDetail) => s.sandbox_id === selectedSandboxId,
+    (s: SandboxDetail) => s.sandbox_id === activeSandboxId,
   );
 
   // Execution query and mutation
@@ -57,30 +54,30 @@ export function ExecutionsPage() {
     isError: isExecsError,
     refetch: refetchExecs,
     isFetching: isExecsFetching,
-  } = useSandboxExecutions(selectedSandboxId || undefined);
+  } = useSandboxExecutions(activeSandboxId || undefined);
 
   const {
     mutate: runCode,
     isPending: isExecuting,
     error: executionError,
     data: latestResult,
-  } = useExecuteCode(selectedSandboxId || undefined);
+  } = useExecuteCode(activeSandboxId || undefined);
 
   // Local editor code state
   const [code, setCode] = useState('print("Hello World")');
   const [timeoutSeconds, setTimeoutSeconds] = useState<number | undefined>(10);
   const [activeResult, setActiveResult] = useState<JobExecution | null>(null);
 
-  // Update active result when mutation resolves
-  useEffect(() => {
-    if (latestResult) {
-      setActiveResult(latestResult);
-    }
-  }, [latestResult]);
+  const displayedResult = latestResult ?? activeResult;
 
   const handleRun = () => {
-    if (!selectedSandboxId || !code.trim()) return;
-    runCode({ code, timeout_seconds: timeoutSeconds });
+    if (!activeSandboxId || !code.trim()) return;
+    runCode(
+      { code, timeout_seconds: timeoutSeconds },
+      {
+        onSuccess: (res) => setActiveResult(res),
+      }
+    );
   };
 
   const isSandboxRunnable = selectedSandbox?.status === "running";
@@ -308,7 +305,7 @@ export function ExecutionsPage() {
 
             {/* Latest Execution Output */}
             <ExecutionOutput
-              execution={activeResult}
+              execution={displayedResult}
               isPending={isExecuting}
               error={executionError}
             />
@@ -322,7 +319,7 @@ export function ExecutionsPage() {
               isError={isExecsError}
               onRefresh={refetchExecs}
               isRefreshing={isExecsFetching}
-              title={`Executions for ${selectedSandboxId.slice(0, 8)}...`}
+              title={`Executions for ${activeSandboxId.slice(0, 8)}...`}
             />
           </div>
         </>

@@ -63,24 +63,14 @@ export function Dashboard() {
         <span
           style={{
             fontWeight: 600,
-            color: "var(--color-warning)",
+            color: "var(--color-accent)",
             fontSize: 10,
             letterSpacing: "0.05em",
           }}
         >
-          DEMO
+          BFF INTEGRATED
         </span>
-        Dashboard displays static placeholder data. Start the backend at{" "}
-        <code
-          style={{
-            fontFamily: "monospace",
-            fontSize: 11,
-            color: "var(--color-text-secondary)",
-          }}
-        >
-          {import.meta.env.VITE_API_BASE_URL ?? "http://127.0.0.1:8000"}
-        </code>{" "}
-        for live data.
+        Connected to FastAPI backend via authenticated server-side BFF proxy.
       </div>
 
       {/* Stat Cards */}

@@ -23,6 +23,7 @@ const NAV_ITEMS = [
 export function Sidebar() {
   return (
     <aside
+      className="app-sidebar"
       style={{
         width: 220,
         minHeight: "100vh",

@@ -593,6 +593,7 @@ export function WorkspaceExplorer({
 
       {/* Main Content Area: Split File Tree & Viewer/Editor */}
       <div
+        className="workspace-split-container"
         style={{
           display: "grid",
           gridTemplateColumns: "280px 1fr",

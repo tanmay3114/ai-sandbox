@@ -8,7 +8,7 @@ interface AppLayoutProps {
 
 export function AppLayout({ children }: AppLayoutProps) {
   return (
-    <div style={{ display: "flex", minHeight: "100vh" }}>
+    <div className="app-layout-container" style={{ display: "flex", minHeight: "100vh" }}>
       <Sidebar />
       <div style={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0 }}>
         <Header />
