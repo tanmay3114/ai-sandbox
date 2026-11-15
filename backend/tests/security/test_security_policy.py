@@ -498,11 +498,14 @@ def test_api_rejection_returns_http_400():
 # =====================================================================
 
 @pytest.mark.asyncio
-async def test_agent_tool_error_translation(db_session):
+async def test_agent_tool_error_translation(
+    db_session,
+    engine: EphemeralSandboxEngine,
+):
     """Agent tool layer converts exceptions into structured AgentToolError
     without leaking tracebacks.
     """
-    service = SandboxLifecycleService(db_session)
+    service = SandboxLifecycleService(db=db_session, backend=engine)
     sandbox = service.create_sandbox()
 
     # 1. Invalid tool name -> InvalidToolName
@@ -522,8 +525,8 @@ async def test_agent_tool_error_translation(db_session):
 
     # 3. SecurityPolicyViolationError during tool execution
     with patch.object(
-        service.engine.policy_engine,
-        "evaluate",
+        service,
+        "execute_code",
         side_effect=SecurityPolicyViolationError(
             "Privileged container execution is strictly forbidden.",
             details={"violation": "privileged_execution_forbidden"},

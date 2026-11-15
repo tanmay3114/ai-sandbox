@@ -8,18 +8,26 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+BACKEND_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 
-ENV_TEST_FILE="$REPO_ROOT/.env.test"
-COMPOSE_TEST_FILE="$REPO_ROOT/compose.test.yaml"
-
-if [[ ! -f "$ENV_TEST_FILE" ]]; then
-    echo "ERROR: Test environment configuration file not found at $ENV_TEST_FILE" >&2
+# Resolve .env.test location (backend/.env.test or root .env.test)
+if [[ -f "$BACKEND_DIR/.env.test" ]]; then
+    ENV_TEST_FILE="$BACKEND_DIR/.env.test"
+elif [[ -f "$REPO_ROOT/.env.test" ]]; then
+    ENV_TEST_FILE="$REPO_ROOT/.env.test"
+else
+    echo "ERROR: Test environment configuration file not found at $BACKEND_DIR/.env.test or $REPO_ROOT/.env.test" >&2
     exit 1
 fi
 
-if [[ ! -f "$COMPOSE_TEST_FILE" ]]; then
-    echo "ERROR: Test Compose file not found at $COMPOSE_TEST_FILE" >&2
+# Resolve compose.test.yaml location (backend/compose.test.yaml or root compose.test.yaml)
+if [[ -f "$BACKEND_DIR/compose.test.yaml" ]]; then
+    COMPOSE_TEST_FILE="$BACKEND_DIR/compose.test.yaml"
+elif [[ -f "$REPO_ROOT/compose.test.yaml" ]]; then
+    COMPOSE_TEST_FILE="$REPO_ROOT/compose.test.yaml"
+else
+    echo "ERROR: Test Compose file not found at $BACKEND_DIR/compose.test.yaml or $REPO_ROOT/compose.test.yaml" >&2
     exit 1
 fi
 

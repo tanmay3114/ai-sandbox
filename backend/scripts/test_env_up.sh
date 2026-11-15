@@ -8,19 +8,51 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+BACKEND_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 
-ENV_TEST_FILE="$REPO_ROOT/.env.test"
-COMPOSE_TEST_FILE="$REPO_ROOT/compose.test.yaml"
-
-if [[ ! -f "$ENV_TEST_FILE" ]]; then
-    echo "ERROR: Test environment configuration file not found at $ENV_TEST_FILE" >&2
+# Resolve .env.test location (backend/.env.test or root .env.test)
+if [[ -f "$BACKEND_DIR/.env.test" ]]; then
+    ENV_TEST_FILE="$BACKEND_DIR/.env.test"
+elif [[ -f "$REPO_ROOT/.env.test" ]]; then
+    ENV_TEST_FILE="$REPO_ROOT/.env.test"
+else
+    echo "ERROR: Test environment configuration file not found at $BACKEND_DIR/.env.test or $REPO_ROOT/.env.test" >&2
     exit 1
 fi
 
-if [[ ! -f "$COMPOSE_TEST_FILE" ]]; then
-    echo "ERROR: Test Compose file not found at $COMPOSE_TEST_FILE" >&2
+# Resolve compose.test.yaml location (backend/compose.test.yaml or root compose.test.yaml)
+if [[ -f "$BACKEND_DIR/compose.test.yaml" ]]; then
+    COMPOSE_TEST_FILE="$BACKEND_DIR/compose.test.yaml"
+elif [[ -f "$REPO_ROOT/compose.test.yaml" ]]; then
+    COMPOSE_TEST_FILE="$REPO_ROOT/compose.test.yaml"
+else
+    echo "ERROR: Test Compose file not found at $BACKEND_DIR/compose.test.yaml or $REPO_ROOT/compose.test.yaml" >&2
     exit 1
+fi
+
+# Resolve alembic executable and alembic.ini config
+ALEMBIC_BIN=""
+if [[ -x "$REPO_ROOT/.venv/bin/alembic" ]]; then
+    ALEMBIC_BIN="$REPO_ROOT/.venv/bin/alembic"
+elif [[ -x "$BACKEND_DIR/.venv/bin/alembic" ]]; then
+    ALEMBIC_BIN="$BACKEND_DIR/.venv/bin/alembic"
+elif [[ -x "$REPO_ROOT/venv/bin/alembic" ]]; then
+    ALEMBIC_BIN="$REPO_ROOT/venv/bin/alembic"
+elif [[ -x "$BACKEND_DIR/venv/bin/alembic" ]]; then
+    ALEMBIC_BIN="$BACKEND_DIR/venv/bin/alembic"
+elif command -v alembic >/dev/null 2>&1; then
+    ALEMBIC_BIN="$(command -v alembic)"
+else
+    echo "ERROR: alembic executable not found in .venv, venv, or PATH" >&2
+    exit 1
+fi
+
+ALEMBIC_CONFIG=""
+if [[ -f "$BACKEND_DIR/alembic.ini" ]]; then
+    ALEMBIC_CONFIG="$BACKEND_DIR/alembic.ini"
+elif [[ -f "$REPO_ROOT/alembic.ini" ]]; then
+    ALEMBIC_CONFIG="$REPO_ROOT/alembic.ini"
 fi
 
 # Export test environment variables
@@ -82,7 +114,11 @@ echo "==> Starting isolated test PostgreSQL container (project: ai-sandbox-test)
 docker compose -p ai-sandbox-test -f "$COMPOSE_TEST_FILE" --env-file "$ENV_TEST_FILE" up -d --wait
 
 echo "==> Applying Alembic migrations to disposable test database..."
-SANDBOX_DATABASE_URL="$SANDBOX_DATABASE_URL" "$REPO_ROOT/venv/bin/alembic" upgrade head
+if [[ -n "$ALEMBIC_CONFIG" ]]; then
+    PYTHONPATH="$BACKEND_DIR" SANDBOX_DATABASE_URL="$SANDBOX_DATABASE_URL" "$ALEMBIC_BIN" -c "$ALEMBIC_CONFIG" upgrade head
+else
+    PYTHONPATH="$BACKEND_DIR" SANDBOX_DATABASE_URL="$SANDBOX_DATABASE_URL" "$ALEMBIC_BIN" upgrade head
+fi
 
 echo "==> Isolated test environment is UP, migrated, and verified safe."
 echo "    Database: $SANDBOX_DATABASE_URL"

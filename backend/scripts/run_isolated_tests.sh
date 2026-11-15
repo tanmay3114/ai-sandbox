@@ -8,12 +8,33 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+BACKEND_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 
-ENV_TEST_FILE="$REPO_ROOT/.env.test"
+# Resolve .env.test location (backend/.env.test or root .env.test)
+if [[ -f "$BACKEND_DIR/.env.test" ]]; then
+    ENV_TEST_FILE="$BACKEND_DIR/.env.test"
+elif [[ -f "$REPO_ROOT/.env.test" ]]; then
+    ENV_TEST_FILE="$REPO_ROOT/.env.test"
+else
+    echo "ERROR: Test environment configuration file not found at $BACKEND_DIR/.env.test or $REPO_ROOT/.env.test" >&2
+    exit 1
+fi
 
-if [[ ! -f "$ENV_TEST_FILE" ]]; then
-    echo "ERROR: Test environment configuration file not found at $ENV_TEST_FILE" >&2
+# Resolve pytest executable
+PYTEST_BIN=""
+if [[ -x "$REPO_ROOT/.venv/bin/pytest" ]]; then
+    PYTEST_BIN="$REPO_ROOT/.venv/bin/pytest"
+elif [[ -x "$BACKEND_DIR/.venv/bin/pytest" ]]; then
+    PYTEST_BIN="$BACKEND_DIR/.venv/bin/pytest"
+elif [[ -x "$REPO_ROOT/venv/bin/pytest" ]]; then
+    PYTEST_BIN="$REPO_ROOT/venv/bin/pytest"
+elif [[ -x "$BACKEND_DIR/venv/bin/pytest" ]]; then
+    PYTEST_BIN="$BACKEND_DIR/venv/bin/pytest"
+elif command -v pytest >/dev/null 2>&1; then
+    PYTEST_BIN="$(command -v pytest)"
+else
+    echo "ERROR: pytest executable not found in .venv, venv, or PATH" >&2
     exit 1
 fi
 
@@ -34,4 +55,4 @@ if [[ "${SANDBOX_ENVIRONMENT:-}" != "test" ]] || \
 fi
 
 echo "==> Running pytest in isolated test mode (PROJECT_LABEL=$SANDBOX_PROJECT_LABEL, DB=ai_sandbox_test)..."
-exec "$REPO_ROOT/venv/bin/pytest" "$@"
+exec "$PYTEST_BIN" "$@"

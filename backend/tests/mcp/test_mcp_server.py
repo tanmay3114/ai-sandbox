@@ -22,6 +22,7 @@ from app.core.exceptions import (
 from app.mcp.server import create_mcp_server
 from app.models.execution_job import ExecutionJob, JobStatus
 from app.models.sandbox import Sandbox, SandboxStatus
+from app.sandbox.schemas import FileContent, FileInfo, FileListResponse
 from app.schemas.sandbox import JobExecutionResponse
 
 
@@ -118,6 +119,27 @@ def mock_lifecycle_service() -> MagicMock:
         error_message=None,
     )
 
+    sample_file_info = FileInfo(
+        path="hello.txt",
+        size_bytes=5,
+        is_directory=False,
+        modified_at=now,
+    )
+    service.write_file.return_value = sample_file_info
+    service.read_file.return_value = FileContent(
+        path="hello.txt",
+        content="world",
+        encoding="utf-8",
+        size_bytes=5,
+    )
+    service.list_files.return_value = FileListResponse(
+        files=[sample_file_info],
+        total_count=1,
+        total_size_bytes=5,
+    )
+    service.create_directory.return_value = True
+    service.delete_file.return_value = True
+
     return service
 
 
@@ -158,6 +180,11 @@ async def test_mcp_required_tools_registered_and_names(mcp_server):
         "get_execution_result",
         "get_sandbox",
         "destroy_sandbox",
+        "write_file",
+        "read_file",
+        "list_files",
+        "create_directory",
+        "delete_file",
     }
     assert tool_names == expected_tools
 
@@ -203,6 +230,18 @@ async def test_mcp_input_schemas_valid(mcp_server):
     # destroy_sandbox schema
     ds_props = tool_map["destroy_sandbox"].input_schema["properties"]
     assert "sandbox_id" in ds_props
+
+    # workspace tools schemas
+    wf_props = tool_map["write_file"].input_schema["properties"]
+    assert {"sandbox_id", "path", "content", "encoding"} <= set(wf_props.keys())
+    rf_props = tool_map["read_file"].input_schema["properties"]
+    assert {"sandbox_id", "path"} <= set(rf_props.keys())
+    lf_props = tool_map["list_files"].input_schema["properties"]
+    assert {"sandbox_id", "path"} <= set(lf_props.keys())
+    cd_props = tool_map["create_directory"].input_schema["properties"]
+    assert {"sandbox_id", "path"} <= set(cd_props.keys())
+    df_props = tool_map["delete_file"].input_schema["properties"]
+    assert {"sandbox_id", "path"} <= set(df_props.keys())
 
 
 @pytest.mark.asyncio
@@ -308,6 +347,76 @@ async def test_mcp_destroy_sandbox_delegation(mcp_server, mock_lifecycle_service
 
     mock_lifecycle_service.delete_sandbox.assert_called_once_with(
         uuid.UUID(target_sandbox_id),
+    )
+
+
+@pytest.mark.asyncio
+async def test_mcp_workspace_tools_delegation(mcp_server, mock_lifecycle_service):
+    """10b. Workspace MCP tools delegate directly to SandboxLifecycleService."""
+    target_sandbox_id = str(uuid.uuid4())
+    target_uuid = uuid.UUID(target_sandbox_id)
+
+    w_res = await mcp_server.call_tool(
+        "write_file",
+        {
+            "sandbox_id": target_sandbox_id,
+            "path": "hello.txt",
+            "content": "world",
+            "encoding": "utf-8",
+        },
+    )
+    w_data = _parse_tool_result(w_res)
+    assert w_data["path"] == "hello.txt"
+    assert w_data["size_bytes"] == 5
+    mock_lifecycle_service.write_file.assert_called_once_with(
+        sandbox_id=target_uuid,
+        path="hello.txt",
+        content="world",
+        encoding="utf-8",
+    )
+
+    r_res = await mcp_server.call_tool(
+        "read_file",
+        {"sandbox_id": target_sandbox_id, "path": "hello.txt"},
+    )
+    r_data = _parse_tool_result(r_res)
+    assert r_data["content"] == "world"
+    mock_lifecycle_service.read_file.assert_called_once_with(
+        sandbox_id=target_uuid,
+        path="hello.txt",
+    )
+
+    l_res = await mcp_server.call_tool(
+        "list_files",
+        {"sandbox_id": target_sandbox_id, "path": ""},
+    )
+    l_data = _parse_tool_result(l_res)
+    assert l_data["total_count"] == 1
+    mock_lifecycle_service.list_files.assert_called_once_with(
+        sandbox_id=target_uuid,
+        path="",
+    )
+
+    cd_res = await mcp_server.call_tool(
+        "create_directory",
+        {"sandbox_id": target_sandbox_id, "path": "subdir"},
+    )
+    cd_data = _parse_tool_result(cd_res)
+    assert cd_data == {"path": "subdir", "created": True}
+    mock_lifecycle_service.create_directory.assert_called_once_with(
+        sandbox_id=target_uuid,
+        path="subdir",
+    )
+
+    df_res = await mcp_server.call_tool(
+        "delete_file",
+        {"sandbox_id": target_sandbox_id, "path": "hello.txt"},
+    )
+    df_data = _parse_tool_result(df_res)
+    assert df_data == {"path": "hello.txt", "deleted": True}
+    mock_lifecycle_service.delete_file.assert_called_once_with(
+        sandbox_id=target_uuid,
+        path="hello.txt",
     )
 
 
