@@ -91,6 +91,89 @@ class DestroySandboxInput(BaseModel):
     )
 
 
+class WriteFileInput(BaseModel):
+    """Input schema for write_file tool."""
+
+    sandbox_id: uuid.UUID = Field(
+        ...,
+        description="UUID of the active sandbox session",
+    )
+    path: str = Field(
+        ...,
+        min_length=1,
+        max_length=255,
+        description="Workspace-relative file path",
+    )
+    content: str = Field(
+        ...,
+        max_length=70 * 1024 * 1024,
+        description="File content (plain text or base64)",
+    )
+    encoding: str = Field(
+        default="utf-8",
+        description="Content encoding format ('utf-8' or 'base64')",
+    )
+
+
+class ReadFileInput(BaseModel):
+    """Input schema for read_file tool."""
+
+    sandbox_id: uuid.UUID = Field(
+        ...,
+        description="UUID of the active sandbox session",
+    )
+    path: str = Field(
+        ...,
+        min_length=1,
+        max_length=255,
+        description="Workspace-relative file path to read",
+    )
+
+
+class ListFilesInput(BaseModel):
+    """Input schema for list_files tool."""
+
+    sandbox_id: uuid.UUID = Field(
+        ...,
+        description="UUID of the active sandbox session",
+    )
+    path: str = Field(
+        default="",
+        max_length=255,
+        description="Optional workspace-relative directory path to list (defaults to root)",
+    )
+
+
+class CreateDirectoryInput(BaseModel):
+    """Input schema for create_directory tool."""
+
+    sandbox_id: uuid.UUID = Field(
+        ...,
+        description="UUID of the active sandbox session",
+    )
+    path: str = Field(
+        ...,
+        min_length=1,
+        max_length=255,
+        description="Workspace-relative directory path to create",
+    )
+
+
+class DeleteFileInput(BaseModel):
+    """Input schema for delete_file tool."""
+
+    sandbox_id: uuid.UUID = Field(
+        ...,
+        description="UUID of the active sandbox session",
+    )
+    path: str = Field(
+        ...,
+        min_length=1,
+        max_length=255,
+        description="Workspace-relative file or empty directory path to delete",
+    )
+
+
 class AgentToolError(BaseModel):
     """Structured, deterministic error representation returned to an AI agent."""
 
@@ -158,5 +241,45 @@ AGENT_TOOLS: dict[str, AgentToolDefinition] = {
             "resources and preventing further code execution."
         ),
         parameters=DestroySandboxInput.model_json_schema(),
+    ),
+    "write_file": AgentToolDefinition(
+        name="write_file",
+        description=(
+            "Create or atomically overwrite a file inside the persistent workspace of an active "
+            "sandbox session using UTF-8 text or base64-encoded binary content."
+        ),
+        parameters=WriteFileInput.model_json_schema(),
+    ),
+    "read_file": AgentToolDefinition(
+        name="read_file",
+        description=(
+            "Read a file from the persistent workspace of an active sandbox session, returning "
+            "UTF-8 text or base64-encoded binary content."
+        ),
+        parameters=ReadFileInput.model_json_schema(),
+    ),
+    "list_files": AgentToolDefinition(
+        name="list_files",
+        description=(
+            "List files and directories inside the persistent workspace of an active sandbox "
+            "session, returning relative paths, sizes, and modification timestamps."
+        ),
+        parameters=ListFilesInput.model_json_schema(),
+    ),
+    "create_directory": AgentToolDefinition(
+        name="create_directory",
+        description=(
+            "Create a directory (and any missing parent directories) inside the persistent "
+            "workspace of an active sandbox session."
+        ),
+        parameters=CreateDirectoryInput.model_json_schema(),
+    ),
+    "delete_file": AgentToolDefinition(
+        name="delete_file",
+        description=(
+            "Delete a file or empty directory inside the persistent workspace of an active "
+            "sandbox session."
+        ),
+        parameters=DeleteFileInput.model_json_schema(),
     ),
 }

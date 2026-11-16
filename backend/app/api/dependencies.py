@@ -2,7 +2,6 @@
 
 from functools import lru_cache
 
-import docker
 from fastapi import Depends
 from sqlalchemy.orm import Session
 
@@ -10,8 +9,9 @@ from app.agent.agent import SandboxAgent
 from app.agent.llm import LLMProvider, get_llm_provider
 from app.core.config import SandboxSettings, settings
 from app.db.session import get_db
-from app.sandbox.docker_client import get_docker_client
-from app.sandbox.engine import EphemeralSandboxEngine
+from app.sandbox.backend import SandboxBackend
+from app.sandbox.factory import create_sandbox_backend
+from app.services.agent_orchestrator_service import AgentOrchestratorService
 from app.services.sandbox_lifecycle_service import SandboxLifecycleService
 from app.services.sandbox_service import SandboxService
 
@@ -23,29 +23,23 @@ def get_settings() -> SandboxSettings:
 
 
 @lru_cache
-def get_docker_client_dependency() -> docker.DockerClient:
-    """Return cached Docker client."""
-    return get_docker_client()
-
-
-@lru_cache
-def get_sandbox_engine() -> EphemeralSandboxEngine:
-    """Return shared EphemeralSandboxEngine instance with concurrency semaphore."""
-    return EphemeralSandboxEngine(config=get_settings(), client=get_docker_client_dependency())
+def get_sandbox_backend() -> SandboxBackend:
+    """Return the one process-shared backend and concurrency controller."""
+    return create_sandbox_backend(config=get_settings())
 
 
 def get_sandbox_service() -> SandboxService:
     """Provide SandboxService instance."""
-    return SandboxService(engine=get_sandbox_engine(), config=get_settings())
+    return SandboxService(backend=get_sandbox_backend())
 
 
 def get_sandbox_lifecycle_service(
     db: Session = Depends(get_db),
-    engine: EphemeralSandboxEngine = Depends(get_sandbox_engine),
+    backend: SandboxBackend = Depends(get_sandbox_backend),
     config: SandboxSettings = Depends(get_settings),
 ) -> SandboxLifecycleService:
     """Provide SandboxLifecycleService instance backed by PostgreSQL session."""
-    return SandboxLifecycleService(db=db, config=config, engine=engine)
+    return SandboxLifecycleService(db=db, config=config, backend=backend)
 
 
 def get_llm_provider_dependency(
@@ -63,3 +57,17 @@ def get_sandbox_agent(
     """Provide SandboxAgent instance configured with LLM provider and sandbox service."""
     return SandboxAgent(llm_provider=llm, service=service, config=config)
 
+
+def get_agent_orchestrator_service(
+    db: Session = Depends(get_db),
+    service: SandboxLifecycleService = Depends(get_sandbox_lifecycle_service),
+    llm: LLMProvider = Depends(get_llm_provider_dependency),
+    config: SandboxSettings = Depends(get_settings),
+) -> AgentOrchestratorService:
+    """Provide AgentOrchestratorService instance backed by PostgreSQL and LLM provider."""
+    return AgentOrchestratorService(
+        db=db,
+        service=service,
+        llm_provider=llm,
+        config=config,
+    )

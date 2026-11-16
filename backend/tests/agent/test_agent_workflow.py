@@ -35,7 +35,7 @@ async def test_complete_agent_workflow(
     5. destroy_sandbox
     6. verify rejection of execution on destroyed sandbox
     """
-    service = SandboxLifecycleService(db=db_session, engine=engine)
+    service = SandboxLifecycleService(db=db_session, backend=engine)
 
     # 1. create_sandbox
     create_res = await execute_agent_tool(
@@ -113,7 +113,7 @@ async def test_agent_tool_failed_execution(
     engine: EphemeralSandboxEngine,
 ):
     """Agent submits Python code that raises an unhandled runtime exception."""
-    service = SandboxLifecycleService(db=db_session, engine=engine)
+    service = SandboxLifecycleService(db=db_session, backend=engine)
     create_res = create_sandbox_tool(service, {"runtime": "python", "ttl_seconds": 180})
 
     exec_res = await execute_code_tool(
@@ -132,7 +132,7 @@ async def test_agent_tool_timed_out_execution(
     engine: EphemeralSandboxEngine,
 ):
     """Agent submits Python code that exceeds the execution timeout."""
-    service = SandboxLifecycleService(db=db_session, engine=engine)
+    service = SandboxLifecycleService(db=db_session, backend=engine)
     create_res = create_sandbox_tool(service, {"runtime": "python", "ttl_seconds": 180})
 
     exec_res = await execute_code_tool(
@@ -154,7 +154,7 @@ async def test_agent_tool_expired_sandbox(
     engine: EphemeralSandboxEngine,
 ):
     """Agent attempts execution on a TTL-expired sandbox."""
-    service = SandboxLifecycleService(db=db_session, engine=engine)
+    service = SandboxLifecycleService(db=db_session, backend=engine)
     sandbox = service.create_sandbox(runtime="python", ttl_seconds=10)
 
     # Fast-forward expiry
@@ -176,7 +176,7 @@ async def test_agent_tool_execution_ownership_mismatch(
     engine: EphemeralSandboxEngine,
 ):
     """Agent tries to query an execution belonging to another sandbox."""
-    service = SandboxLifecycleService(db=db_session, engine=engine)
+    service = SandboxLifecycleService(db=db_session, backend=engine)
     s1 = service.create_sandbox(runtime="python", ttl_seconds=180)
     s2 = service.create_sandbox(runtime="python", ttl_seconds=180)
 
@@ -197,7 +197,7 @@ async def test_agent_tool_invalid_tool_name(
     engine: EphemeralSandboxEngine,
 ):
     """Agent calls a non-existent tool name."""
-    service = SandboxLifecycleService(db=db_session, engine=engine)
+    service = SandboxLifecycleService(db=db_session, backend=engine)
     err_res = await execute_agent_tool("unknown_tool", {}, service=service)
     assert isinstance(err_res, AgentToolError)
     assert err_res.error == "InvalidToolName"
@@ -209,7 +209,7 @@ async def test_agent_tool_validation_error(
     engine: EphemeralSandboxEngine,
 ):
     """Agent provides invalid schema parameters (e.g. empty code)."""
-    service = SandboxLifecycleService(db=db_session, engine=engine)
+    service = SandboxLifecycleService(db=db_session, backend=engine)
     s = service.create_sandbox(runtime="python", ttl_seconds=180)
 
     err_res = await execute_agent_tool(

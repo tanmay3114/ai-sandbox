@@ -1,0 +1,43 @@
+#!/bin/sh
+set -x
+
+export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+
+mount -t proc proc /proc
+mount -t sysfs sysfs /sys
+mount -t devtmpfs devtmpfs /dev || true
+mkdir -p /dev/pts /run /tmp /workspace
+
+exec </dev/console >/dev/console 2>&1
+
+echo "=== GUEST INIT START ==="
+ls -la /dev
+
+# Populate /dev/virtio-ports symlinks
+mkdir -p /dev/virtio-ports
+for sys_port in /sys/class/virtio-ports/*; do
+    if [ -e "$sys_port/name" ]; then
+        port_name="$(cat "$sys_port/name")"
+        dev_name="$(basename "$sys_port")"
+        echo "Found virtio port: $dev_name -> $port_name"
+        if [ -e "/dev/$dev_name" ]; then
+            chown 0:0 "/dev/$dev_name"
+            chmod 0600 "/dev/$dev_name"
+            ln -sf "/dev/$dev_name" "/dev/virtio-ports/$port_name"
+        fi
+    fi
+done
+
+ls -la /dev/virtio-ports || true
+
+if command -v ip >/dev/null 2>&1; then
+    ip link set lo up || true
+fi
+
+echo "=== LAUNCHING GUEST AGENT ==="
+/usr/bin/python3 /opt/aisandbox/guest_agent.py --workspace-dir /workspace || echo "AGENT EXITED WITH: $?"
+
+echo "=== GUEST AGENT TERMINATED ==="
+sync
+/sbin/poweroff -f
+exec /bin/sh

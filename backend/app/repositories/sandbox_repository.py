@@ -53,8 +53,16 @@ class SandboxRepository:
 
     def update_status(self, sandbox: Sandbox, target_status: SandboxStatus) -> Sandbox:
         """Transition sandbox to new status and persist."""
+        previous_status = sandbox.status
+        previous_destroyed_at = sandbox.destroyed_at
         sandbox.transition_to(target_status)
-        self.db.commit()
+        try:
+            self.db.commit()
+        except Exception:
+            sandbox.status = previous_status
+            sandbox.destroyed_at = previous_destroyed_at
+            self.db.rollback()
+            raise
         self.db.refresh(sandbox)
         return sandbox
 
@@ -70,29 +78,63 @@ class SandboxRepository:
         return list(self.db.scalars(stmt).all())
 
     def claim_for_execution(self, sandbox_id: uuid.UUID) -> Sandbox | None:
-        """Atomically move a ready sandbox to EXECUTING.
+        """Atomically move a ready, non-expired sandbox to EXECUTING.
 
         The conditional update prevents two concurrent requests from both
-        observing RUNNING and submitting work for the same logical sandbox.
+        observing RUNNING and submitting work for the same logical sandbox,
+        and prevents claiming a sandbox whose TTL has already elapsed.
         """
+        now = utc_now()
         stmt = (
             update(Sandbox)
-            .where(Sandbox.id == sandbox_id, Sandbox.status == SandboxStatus.RUNNING)
-            .values(status=SandboxStatus.EXECUTING, updated_at=utc_now())
+            .where(
+                Sandbox.id == sandbox_id,
+                Sandbox.status == SandboxStatus.RUNNING,
+                Sandbox.expires_at > now,
+            )
+            .values(status=SandboxStatus.EXECUTING, updated_at=now)
         )
-        result = self.db.execute(stmt)
-        self.db.commit()
+        try:
+            result = self.db.execute(stmt)
+            self.db.commit()
+        except Exception:
+            self.db.rollback()
+            raise
         if result.rowcount != 1:
             return None
         return self.get_by_id(sandbox_id)
 
+    def release_execution_claim(self, sandbox_id: uuid.UUID) -> Sandbox | None:
+        """Conditionally transition an EXECUTING sandbox back to RUNNING if still active.
+
+        Does not overwrite DESTROYING, DESTROYED, or EXPIRED states if a concurrent
+        lifecycle termination occurred during execution.
+        """
+        now = utc_now()
+        stmt = (
+            update(Sandbox)
+            .where(
+                Sandbox.id == sandbox_id,
+                Sandbox.status == SandboxStatus.EXECUTING,
+                Sandbox.expires_at > now,
+            )
+            .values(status=SandboxStatus.RUNNING, updated_at=now)
+        )
+        try:
+            self.db.execute(stmt)
+            self.db.commit()
+        except Exception:
+            self.db.rollback()
+            raise
+        return self.get_by_id(sandbox_id)
+
     def get_expired_active(self, now: datetime | None = None, limit: int = 50) -> list[Sandbox]:
-        """Find sandboxes whose TTL has passed but are not yet marked DESTROYED."""
+        """Find sandboxes whose TTL has passed and are not DESTROYED or DESTROYING."""
         check_time = now or utc_now()
         stmt = (
             select(Sandbox)
             .where(
-                Sandbox.status != SandboxStatus.DESTROYED,
+                Sandbox.status.not_in([SandboxStatus.DESTROYED, SandboxStatus.DESTROYING]),
                 Sandbox.expires_at <= check_time,
             )
             .order_by(Sandbox.expires_at.asc())

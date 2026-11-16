@@ -14,6 +14,7 @@ from app.db.base import Base
 
 class InvalidStateTransitionError(SandboxPlatformError):
     """Raised when an illegal lifecycle state transition is requested."""
+
     pass
 
 
@@ -156,6 +157,12 @@ class Sandbox(Base):
         back_populates="sandbox",
         cascade="all, delete-orphan",
         order_by="ExecutionJob.submitted_at.desc()",
+    )
+    agent_tasks: Mapped[list["AgentTask"]] = relationship(  # noqa: F821
+        "AgentTask",
+        back_populates="sandbox",
+        cascade="all, delete-orphan",
+        order_by="AgentTask.created_at.desc()",
     )
 
     @property

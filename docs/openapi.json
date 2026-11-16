@@ -1,0 +1,2753 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Cloud-Based Ephemeral Sandbox Platform for AI Agents",
+    "description": "\nSecure, isolated, ephemeral execution environment platform for untrusted AI agent code.\n\n### Security Guarantees:\n* **Privilege Confinement**: Non-root UID (10001), drop ALL capabilities, no-new-privileges.\n* **Filesystem Confinement**: Read-only root filesystem, restricted non-exec /tmp tmpfs, 0 mounts.\n* **Network Isolation**: Disabled network stack (network_mode=none), zero network connectivity.\n* **Resource Bounds**: Strict memory (256MB), CPU quota (0.5 core), and PID limit (32).\n* **Output Bounds**: Hard stream limits preventing host memory exhaustion.\n* **Ephemeral Lifecycle**: One request = one container; timeout kill and guaranteed cleanup.\n",
+    "version": "0.1.0"
+  },
+  "paths": {
+    "/health": {
+      "get": {
+        "tags": [
+          "Health & Probes"
+        ],
+        "summary": "Liveness Probe",
+        "description": "Returns 200 OK if the FastAPI web application process is running and responsive.",
+        "operationId": "health_health_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HealthResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/ready": {
+      "get": {
+        "tags": [
+          "Health & Probes"
+        ],
+        "summary": "Readiness Probe",
+        "description": "Validates that required runtime dependencies (e.g. Docker Engine) are reachable.",
+        "operationId": "ready_ready_get",
+        "responses": {
+          "200": {
+            "description": "Dependencies are operational",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReadyResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Underlying dependencies are unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReadyResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/sandboxes": {
+      "post": {
+        "tags": [
+          "Sandboxes"
+        ],
+        "summary": "Create Persistent Sandbox Session",
+        "description": "Instantiates a new isolated sandbox environment record with a validated TTL (Time-to-Live).\nReturns the assigned sandbox ID and expiration metadata.",
+        "operationId": "create_sandbox_api_v1_sandboxes_post",
+        "parameters": [
+          {
+            "name": "x-api-key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateSandboxRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Sandbox session created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SandboxResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid runtime or TTL configuration",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation error in request payload"
+          }
+        }
+      }
+    },
+    "/api/v1/sandboxes/{sandbox_id}": {
+      "get": {
+        "tags": [
+          "Sandboxes"
+        ],
+        "summary": "Get Sandbox Status",
+        "description": "Retrieve persisted lifecycle state, resource limits, and execution statistics.",
+        "operationId": "get_sandbox_api_v1_sandboxes__sandbox_id__get",
+        "parameters": [
+          {
+            "name": "sandbox_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Sandbox Id"
+            }
+          },
+          {
+            "name": "x-api-key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Sandbox lifecycle information",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SandboxDetailResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Sandbox ID not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Sandboxes"
+        ],
+        "summary": "Destroy Sandbox Session",
+        "description": "Idempotently tears down and destroys the sandbox session and its containers.",
+        "operationId": "delete_sandbox_api_v1_sandboxes__sandbox_id__delete",
+        "parameters": [
+          {
+            "name": "sandbox_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Sandbox Id"
+            }
+          },
+          {
+            "name": "x-api-key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Sandbox terminated and destroyed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SandboxResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Sandbox ID not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/sandboxes/{sandbox_id}/execute": {
+      "post": {
+        "tags": [
+          "Sandboxes"
+        ],
+        "summary": "Execute Code within Persistent Sandbox",
+        "description": "Runs code in the designated sandbox session, recording full job history.",
+        "operationId": "execute_in_sandbox_api_v1_sandboxes__sandbox_id__execute_post",
+        "parameters": [
+          {
+            "name": "sandbox_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Sandbox Id"
+            }
+          },
+          {
+            "name": "x-api-key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ExecutionRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Execution completed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobExecutionResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Sandbox expired or destroyed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Sandbox not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Sandbox is currently executing another task",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Global concurrency limit reached",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Docker execution backend unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/sandboxes/{sandbox_id}/executions/{execution_id}": {
+      "get": {
+        "tags": [
+          "Sandboxes"
+        ],
+        "summary": "Get Execution Job Result",
+        "description": "Retrieve status, logs, exit code, and timestamps for an execution job within a sandbox.",
+        "operationId": "get_execution_result_api_v1_sandboxes__sandbox_id__executions__execution_id__get",
+        "parameters": [
+          {
+            "name": "sandbox_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Sandbox Id"
+            }
+          },
+          {
+            "name": "execution_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Execution Id"
+            }
+          },
+          {
+            "name": "x-api-key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Execution details retrieved",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobExecutionResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Sandbox or Execution ID not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/sandboxes/{sandbox_id}/files": {
+      "post": {
+        "tags": [
+          "Sandboxes"
+        ],
+        "summary": "Write Workspace File",
+        "description": "Create or atomically overwrite a file in the sandbox's persistent workspace.",
+        "operationId": "write_workspace_file_api_v1_sandboxes__sandbox_id__files_post",
+        "parameters": [
+          {
+            "name": "sandbox_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Sandbox Id"
+            }
+          },
+          {
+            "name": "x-api-key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WriteFileRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "File created or overwritten in workspace",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FileInfo"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Path traversal, quota exceeded, invalid encoding, or unusable sandbox",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Sandbox not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation error in request payload"
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "Sandboxes"
+        ],
+        "summary": "List Workspace Files",
+        "description": "List files and directories inside the sandbox's persistent workspace.",
+        "operationId": "list_workspace_files_api_v1_sandboxes__sandbox_id__files_get",
+        "parameters": [
+          {
+            "name": "sandbox_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Sandbox Id"
+            }
+          },
+          {
+            "name": "path",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 255,
+              "description": "Optional workspace-relative subdirectory path to list",
+              "default": "",
+              "title": "Path"
+            },
+            "description": "Optional workspace-relative subdirectory path to list"
+          },
+          {
+            "name": "x-api-key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Workspace directory contents listed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FileListResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid path or unusable sandbox",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Sandbox or directory not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Sandboxes"
+        ],
+        "summary": "Delete Workspace File (Query Parameter)",
+        "description": "Delete a file or empty directory inside the sandbox's persistent workspace.",
+        "operationId": "delete_workspace_file_by_query_api_v1_sandboxes__sandbox_id__files_delete",
+        "parameters": [
+          {
+            "name": "sandbox_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Sandbox Id"
+            }
+          },
+          {
+            "name": "path",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 255,
+              "description": "Workspace-relative file or empty directory path to delete",
+              "title": "Path"
+            },
+            "description": "Workspace-relative file or empty directory path to delete"
+          },
+          {
+            "name": "x-api-key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "File or empty directory deleted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeleteFileResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid path or unusable sandbox",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Sandbox or file not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/sandboxes/{sandbox_id}/files/{file_path}": {
+      "get": {
+        "tags": [
+          "Sandboxes"
+        ],
+        "summary": "Read Workspace File",
+        "description": "Read a file from the sandbox's persistent workspace as UTF-8 text or base64.",
+        "operationId": "read_workspace_file_api_v1_sandboxes__sandbox_id__files__file_path__get",
+        "parameters": [
+          {
+            "name": "sandbox_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Sandbox Id"
+            }
+          },
+          {
+            "name": "file_path",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "File Path"
+            }
+          },
+          {
+            "name": "x-api-key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "File content retrieved",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FileContent"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid path, quota, or unusable sandbox",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Sandbox or file not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Sandboxes"
+        ],
+        "summary": "Delete Workspace File",
+        "description": "Delete a file or empty directory inside the sandbox's persistent workspace.",
+        "operationId": "delete_workspace_file_api_v1_sandboxes__sandbox_id__files__file_path__delete",
+        "parameters": [
+          {
+            "name": "sandbox_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Sandbox Id"
+            }
+          },
+          {
+            "name": "file_path",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "File Path"
+            }
+          },
+          {
+            "name": "x-api-key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "File or empty directory deleted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeleteFileResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid path or unusable sandbox",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Sandbox or file not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/sandboxes/{sandbox_id}/directories": {
+      "post": {
+        "tags": [
+          "Sandboxes"
+        ],
+        "summary": "Create Workspace Directory",
+        "description": "Create a directory (and any parent directories) inside the sandbox's workspace.",
+        "operationId": "create_workspace_directory_api_v1_sandboxes__sandbox_id__directories_post",
+        "parameters": [
+          {
+            "name": "sandbox_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Sandbox Id"
+            }
+          },
+          {
+            "name": "x-api-key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateDirectoryRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Directory created in workspace",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreateDirectoryResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid path or unusable sandbox",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Sandbox not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation error in request payload"
+          }
+        }
+      }
+    },
+    "/api/v1/sandboxes/{sandbox_id}/agent/tasks": {
+      "post": {
+        "tags": [
+          "Sandboxes"
+        ],
+        "summary": "Execute Agent Orchestration Task",
+        "description": "Executes an autonomous, model-driven reasoning and tool-calling loop strictly bound to\nthe specified authorized sandbox. The agent inspects files, creates code, runs executions,\nrecovers from non-zero exit errors, and returns a verified final response.",
+        "operationId": "create_and_run_agent_task_api_v1_sandboxes__sandbox_id__agent_tasks_post",
+        "parameters": [
+          {
+            "name": "sandbox_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Sandbox Id"
+            }
+          },
+          {
+            "name": "x-api-key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AgentTaskCreateRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Agent task executed successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentTaskResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Agent domain or execution error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Security policy violation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Sandbox not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Task was cancelled",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation error in task prompt or timeout"
+          },
+          "500": {
+            "description": "Agent max iterations exceeded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "LLM provider communication failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "504": {
+            "description": "Agent task timed out",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "Sandboxes"
+        ],
+        "summary": "List Sandbox Agent Tasks",
+        "description": "Retrieve all agent tasks executed in this sandbox session.",
+        "operationId": "list_sandbox_agent_tasks_api_v1_sandboxes__sandbox_id__agent_tasks_get",
+        "parameters": [
+          {
+            "name": "sandbox_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Sandbox Id"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "default": 50,
+              "title": "Limit"
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0,
+              "title": "Offset"
+            }
+          },
+          {
+            "name": "x-api-key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "List of sandbox agent tasks",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentTaskListResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Sandbox not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/sandboxes/{sandbox_id}/agent/tasks/{task_id}": {
+      "get": {
+        "tags": [
+          "Sandboxes"
+        ],
+        "summary": "Get Agent Task Details",
+        "description": "Retrieve status, iterations, tool history, and final outcome of an agent task.",
+        "operationId": "get_sandbox_agent_task_api_v1_sandboxes__sandbox_id__agent_tasks__task_id__get",
+        "parameters": [
+          {
+            "name": "sandbox_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Sandbox Id"
+            }
+          },
+          {
+            "name": "task_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Task Id"
+            }
+          },
+          {
+            "name": "x-api-key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Agent task details",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentTaskResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Sandbox or task not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/sandboxes/{sandbox_id}/agent/tasks/{task_id}/executions": {
+      "get": {
+        "tags": [
+          "Sandboxes"
+        ],
+        "summary": "Get Agent Task Executions",
+        "description": "Retrieve all code execution jobs executed by the agent during the task.",
+        "operationId": "get_sandbox_agent_task_executions_api_v1_sandboxes__sandbox_id__agent_tasks__task_id__executions_get",
+        "parameters": [
+          {
+            "name": "sandbox_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Sandbox Id"
+            }
+          },
+          {
+            "name": "task_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Task Id"
+            }
+          },
+          {
+            "name": "x-api-key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "List of code execution jobs triggered by the task",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/JobExecutionResponse"
+                  },
+                  "title": "Response Get Sandbox Agent Task Executions Api V1 Sandboxes  Sandbox Id  Agent Tasks  Task Id  Executions Get"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Sandbox or task not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/sandboxes/{sandbox_id}/agent/tasks/{task_id}/cancel": {
+      "post": {
+        "tags": [
+          "Sandboxes"
+        ],
+        "summary": "Cancel Running Agent Task",
+        "description": "Cancel an active in-flight or queued agent task.",
+        "operationId": "cancel_sandbox_agent_task_api_v1_sandboxes__sandbox_id__agent_tasks__task_id__cancel_post",
+        "parameters": [
+          {
+            "name": "sandbox_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Sandbox Id"
+            }
+          },
+          {
+            "name": "task_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Task Id"
+            }
+          },
+          {
+            "name": "x-api-key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Agent task cancelled",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentTaskResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Sandbox or task not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/sandboxes/execute": {
+      "post": {
+        "tags": [
+          "Sandboxes"
+        ],
+        "summary": "Execute Untrusted Code (Ephemeral One-Shot)",
+        "description": "Ephemeral execution: creates a sandbox, runs code, records, and destroys.",
+        "operationId": "execute_ephemeral_code_api_v1_sandboxes_execute_post",
+        "parameters": [
+          {
+            "name": "x-api-key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ExecutionRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Execution finished",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExecutionResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Execution error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation error"
+          },
+          "429": {
+            "description": "Concurrency limit reached",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Docker backend unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/agent/run": {
+      "post": {
+        "tags": [
+          "Agent"
+        ],
+        "summary": "Execute Model-Driven Agent Task",
+        "description": "Executes an autonomous, model-driven reasoning and tool-calling loop.\nThe agent interprets natural-language instructions, decides which sandbox tools to call,\nvalidates arguments, runs untrusted code in hardened containers, and returns a final explanation.",
+        "operationId": "run_agent_api_v1_agent_run_post",
+        "parameters": [
+          {
+            "name": "x-api-key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AgentRunRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Agent run completed successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentRunResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Agent domain or execution error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation error in request payload"
+          },
+          "500": {
+            "description": "Agent loop reached maximum iterations or internal error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Underlying LLM provider failure",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "504": {
+            "description": "Agent execution timed out",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/agent/tasks/{task_id}": {
+      "get": {
+        "tags": [
+          "Agent"
+        ],
+        "summary": "Get Agent Task Details by Task ID",
+        "description": "Retrieve status, iterations, tool history, and final outcome of an agent task.",
+        "operationId": "get_agent_task_by_id_api_v1_agent_tasks__task_id__get",
+        "parameters": [
+          {
+            "name": "task_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Task Id"
+            }
+          },
+          {
+            "name": "x-api-key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Agent task details",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentTaskResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Agent task not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/agent/tasks/{task_id}/cancel": {
+      "post": {
+        "tags": [
+          "Agent"
+        ],
+        "summary": "Cancel Agent Task by Task ID",
+        "description": "Cancel an active in-flight or queued agent task.",
+        "operationId": "cancel_agent_task_by_id_api_v1_agent_tasks__task_id__cancel_post",
+        "parameters": [
+          {
+            "name": "task_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Task Id"
+            }
+          },
+          {
+            "name": "x-api-key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Agent task cancelled",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentTaskResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Agent task not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "AgentRunRequest": {
+        "properties": {
+          "prompt": {
+            "type": "string",
+            "maxLength": 10000,
+            "minLength": 1,
+            "title": "Prompt",
+            "description": "Natural language instruction or question for the AI agent",
+            "examples": [
+              "Calculate factorial of 20 using Python and explain the result."
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "prompt"
+        ],
+        "title": "AgentRunRequest",
+        "description": "Request payload for initiating an AI agent execution run."
+      },
+      "AgentRunResponse": {
+        "properties": {
+          "response": {
+            "type": "string",
+            "title": "Response",
+            "description": "Final natural-language response generated by the agent"
+          },
+          "tools_used": {
+            "type": "boolean",
+            "title": "Tools Used",
+            "description": "True if one or more sandbox tools were executed during reasoning"
+          },
+          "iterations": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Iterations",
+            "description": "Total agent reasoning iterations completed"
+          },
+          "tool_calls_count": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Tool Calls Count",
+            "description": "Total tool calls executed across all iterations",
+            "default": 0
+          },
+          "executed_tools": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Executed Tools",
+            "description": "Names of tools executed during the run in chronological order"
+          }
+        },
+        "type": "object",
+        "required": [
+          "response",
+          "tools_used",
+          "iterations"
+        ],
+        "title": "AgentRunResponse",
+        "description": "Structured response returned by the AI agent execution endpoint."
+      },
+      "AgentTaskCreateRequest": {
+        "properties": {
+          "prompt": {
+            "type": "string",
+            "maxLength": 10000,
+            "minLength": 1,
+            "title": "Prompt",
+            "description": "Natural-language coding, execution, or file task for the agent",
+            "examples": [
+              "Create a fibonacci script, execute it, and explain output."
+            ]
+          },
+          "timeout_seconds": {
+            "anyOf": [
+              {
+                "type": "number",
+                "maximum": 300.0,
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Timeout Seconds",
+            "description": "Optional timeout override in seconds for task orchestration"
+          }
+        },
+        "type": "object",
+        "required": [
+          "prompt"
+        ],
+        "title": "AgentTaskCreateRequest",
+        "description": "Request payload for creating and executing an agent orchestration task."
+      },
+      "AgentTaskListResponse": {
+        "properties": {
+          "tasks": {
+            "items": {
+              "$ref": "#/components/schemas/AgentTaskResponse"
+            },
+            "type": "array",
+            "title": "Tasks"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total",
+            "default": 0
+          }
+        },
+        "type": "object",
+        "title": "AgentTaskListResponse",
+        "description": "Paginated list of agent orchestration tasks."
+      },
+      "AgentTaskResponse": {
+        "properties": {
+          "task_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Task Id",
+            "description": "Unique task identifier"
+          },
+          "sandbox_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Sandbox Id",
+            "description": "Associated sandbox session UUID"
+          },
+          "task_description": {
+            "type": "string",
+            "title": "Task Description",
+            "description": "Original task prompt/description"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status",
+            "description": "Current task status (pending, running, completed, etc.)"
+          },
+          "iterations": {
+            "type": "integer",
+            "title": "Iterations",
+            "description": "Reasoning iterations completed",
+            "default": 0
+          },
+          "tool_calls_count": {
+            "type": "integer",
+            "title": "Tool Calls Count",
+            "description": "Total tool calls performed",
+            "default": 0
+          },
+          "result_summary": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Result Summary",
+            "description": "Final natural-language explanation"
+          },
+          "error_message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Message",
+            "description": "Error message if task failed"
+          },
+          "error_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Type",
+            "description": "Classification of error if failed"
+          },
+          "tool_history": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array",
+            "title": "Tool History",
+            "description": "Structured tool history"
+          },
+          "cancellation_requested_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cancellation Requested At",
+            "description": "Timestamp when cancellation was requested"
+          },
+          "interruption_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Interruption Reason",
+            "description": "Reason if task was interrupted by restart or shutdown"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At",
+            "description": "Timestamp of task creation"
+          },
+          "started_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Started At",
+            "description": "Timestamp when task started"
+          },
+          "completed_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Completed At",
+            "description": "Timestamp when task finished"
+          }
+        },
+        "type": "object",
+        "required": [
+          "task_id",
+          "sandbox_id",
+          "task_description",
+          "status",
+          "created_at"
+        ],
+        "title": "AgentTaskResponse",
+        "description": "Structured response representing an agent orchestration task entity."
+      },
+      "CreateDirectoryRequest": {
+        "properties": {
+          "path": {
+            "type": "string",
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Path",
+            "description": "Workspace-relative path"
+          }
+        },
+        "type": "object",
+        "required": [
+          "path"
+        ],
+        "title": "CreateDirectoryRequest",
+        "description": "Payload for creating a directory in the workspace."
+      },
+      "CreateDirectoryResponse": {
+        "properties": {
+          "path": {
+            "type": "string",
+            "title": "Path",
+            "description": "Workspace-relative POSIX path"
+          },
+          "created": {
+            "type": "boolean",
+            "title": "Created",
+            "description": "True if directory was newly created"
+          }
+        },
+        "type": "object",
+        "required": [
+          "path",
+          "created"
+        ],
+        "title": "CreateDirectoryResponse",
+        "description": "Structured result for directory creation in a sandbox workspace."
+      },
+      "CreateSandboxRequest": {
+        "properties": {
+          "runtime": {
+            "type": "string",
+            "title": "Runtime",
+            "description": "Target runtime identifier (e.g. 'python')",
+            "default": "python"
+          },
+          "ttl_seconds": {
+            "type": "integer",
+            "maximum": 86400.0,
+            "minimum": 10.0,
+            "title": "Ttl Seconds",
+            "description": "Lifespan of sandbox session in seconds before automatic expiration",
+            "default": 300
+          }
+        },
+        "type": "object",
+        "title": "CreateSandboxRequest",
+        "description": "Payload to instantiate a new sandbox session with defined TTL."
+      },
+      "DeleteFileResponse": {
+        "properties": {
+          "path": {
+            "type": "string",
+            "title": "Path",
+            "description": "Workspace-relative POSIX path"
+          },
+          "deleted": {
+            "type": "boolean",
+            "title": "Deleted",
+            "description": "True if entry was deleted"
+          }
+        },
+        "type": "object",
+        "required": [
+          "path",
+          "deleted"
+        ],
+        "title": "DeleteFileResponse",
+        "description": "Structured result for file or empty directory deletion in a sandbox workspace."
+      },
+      "ErrorResponse": {
+        "properties": {
+          "error": {
+            "type": "string",
+            "title": "Error",
+            "description": "Stable error type identifier"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message",
+            "description": "Human-readable description of the error condition"
+          },
+          "details": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Details",
+            "description": "Structured sanitized details (never includes tracebacks or secrets)"
+          }
+        },
+        "type": "object",
+        "required": [
+          "error",
+          "message"
+        ],
+        "title": "ErrorResponse",
+        "description": "Consistent JSON response format for all API error conditions."
+      },
+      "ExecutionRequest": {
+        "properties": {
+          "code": {
+            "type": "string",
+            "maxLength": 1000000,
+            "minLength": 1,
+            "title": "Code",
+            "description": "Python code string to execute"
+          },
+          "timeout_seconds": {
+            "anyOf": [
+              {
+                "type": "number",
+                "maximum": 60.0,
+                "minimum": 0.5
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Timeout Seconds",
+            "description": "Optional execution timeout override, bounded by platform limits"
+          }
+        },
+        "type": "object",
+        "required": [
+          "code"
+        ],
+        "title": "ExecutionRequest",
+        "description": "Payload for submitting untrusted code to the sandbox."
+      },
+      "ExecutionResult": {
+        "properties": {
+          "sandbox_id": {
+            "type": "string",
+            "title": "Sandbox Id",
+            "description": "Unique application identifier for the ephemeral sandbox"
+          },
+          "status": {
+            "$ref": "#/components/schemas/ExecutionStatus",
+            "description": "Final execution status"
+          },
+          "exit_code": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Exit Code",
+            "description": "Process exit code (0 for success, None on timeout/error)"
+          },
+          "stdout": {
+            "type": "string",
+            "title": "Stdout",
+            "description": "Captured standard output (bounded)",
+            "default": ""
+          },
+          "stderr": {
+            "type": "string",
+            "title": "Stderr",
+            "description": "Captured standard error (bounded)",
+            "default": ""
+          },
+          "stdout_truncated": {
+            "type": "boolean",
+            "title": "Stdout Truncated",
+            "description": "True if stdout was truncated due to size limits",
+            "default": false
+          },
+          "stderr_truncated": {
+            "type": "boolean",
+            "title": "Stderr Truncated",
+            "description": "True if stderr was truncated due to size limits",
+            "default": false
+          },
+          "duration_ms": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Duration Ms",
+            "description": "Total execution duration in milliseconds"
+          },
+          "error_message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Message",
+            "description": "Internal error description if status is ERROR"
+          }
+        },
+        "type": "object",
+        "required": [
+          "sandbox_id",
+          "status",
+          "duration_ms"
+        ],
+        "title": "ExecutionResult",
+        "description": "Structured response detailing the execution outcome and security metadata."
+      },
+      "ExecutionStatus": {
+        "type": "string",
+        "enum": [
+          "completed",
+          "timed_out",
+          "failed",
+          "error"
+        ],
+        "title": "ExecutionStatus",
+        "description": "Lifecycle / termination status of a code execution task."
+      },
+      "FileContent": {
+        "properties": {
+          "path": {
+            "type": "string",
+            "title": "Path",
+            "description": "Workspace-relative POSIX path"
+          },
+          "content": {
+            "type": "string",
+            "title": "Content",
+            "description": "File content (plain text or base64)"
+          },
+          "encoding": {
+            "type": "string",
+            "enum": [
+              "utf-8",
+              "base64"
+            ],
+            "title": "Encoding",
+            "description": "Content encoding ('utf-8' or 'base64')",
+            "default": "utf-8"
+          },
+          "size_bytes": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Size Bytes",
+            "description": "Size in bytes"
+          }
+        },
+        "type": "object",
+        "required": [
+          "path",
+          "content",
+          "size_bytes"
+        ],
+        "title": "FileContent",
+        "description": "File content and encoding retrieved from a sandbox workspace."
+      },
+      "FileInfo": {
+        "properties": {
+          "path": {
+            "type": "string",
+            "title": "Path",
+            "description": "Workspace-relative POSIX path"
+          },
+          "size_bytes": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Size Bytes",
+            "description": "Size in bytes"
+          },
+          "is_directory": {
+            "type": "boolean",
+            "title": "Is Directory",
+            "description": "True if entry is a directory"
+          },
+          "modified_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Modified At",
+            "description": "Last modification timestamp (UTC)"
+          }
+        },
+        "type": "object",
+        "required": [
+          "path",
+          "size_bytes",
+          "is_directory",
+          "modified_at"
+        ],
+        "title": "FileInfo",
+        "description": "Metadata describing a file or directory inside a sandbox workspace."
+      },
+      "FileListResponse": {
+        "properties": {
+          "files": {
+            "items": {
+              "$ref": "#/components/schemas/FileInfo"
+            },
+            "type": "array",
+            "title": "Files",
+            "description": "List of workspace entries"
+          },
+          "total_count": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Total Count",
+            "description": "Total entries in this listing"
+          },
+          "total_size_bytes": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Total Size Bytes",
+            "description": "Total size in bytes across listed files"
+          }
+        },
+        "type": "object",
+        "required": [
+          "total_count",
+          "total_size_bytes"
+        ],
+        "title": "FileListResponse",
+        "description": "Directory listing result with aggregated summary metadata."
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "type": "array",
+            "title": "Detail"
+          }
+        },
+        "type": "object",
+        "title": "HTTPValidationError"
+      },
+      "HealthResponse": {
+        "properties": {
+          "status": {
+            "type": "string",
+            "title": "Status",
+            "description": "Process liveness status",
+            "default": "ok"
+          },
+          "service": {
+            "type": "string",
+            "title": "Service",
+            "description": "Platform service name",
+            "default": "ai-sandbox-platform"
+          }
+        },
+        "type": "object",
+        "title": "HealthResponse",
+        "description": "Liveness probe response."
+      },
+      "JobExecutionResponse": {
+        "properties": {
+          "execution_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Execution Id",
+            "description": "Unique identifier for execution job"
+          },
+          "sandbox_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Sandbox Id",
+            "description": "Parent sandbox session UUID"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status",
+            "description": "Status ('completed', 'failed', 'timed_out', 'error')"
+          },
+          "exit_code": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Exit Code",
+            "description": "Process exit code"
+          },
+          "stdout": {
+            "type": "string",
+            "title": "Stdout",
+            "description": "Captured standard output",
+            "default": ""
+          },
+          "stderr": {
+            "type": "string",
+            "title": "Stderr",
+            "description": "Captured standard error",
+            "default": ""
+          },
+          "stdout_truncated": {
+            "type": "boolean",
+            "title": "Stdout Truncated",
+            "description": "True if stdout was truncated",
+            "default": false
+          },
+          "stderr_truncated": {
+            "type": "boolean",
+            "title": "Stderr Truncated",
+            "description": "True if stderr was truncated",
+            "default": false
+          },
+          "duration_ms": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Duration Ms",
+            "description": "Execution duration in milliseconds"
+          },
+          "submitted_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Submitted At",
+            "description": "UTC submission timestamp"
+          },
+          "started_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Started At",
+            "description": "UTC start timestamp"
+          },
+          "completed_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Completed At",
+            "description": "UTC completion timestamp"
+          },
+          "error_message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Message",
+            "description": "Diagnostic error message"
+          }
+        },
+        "type": "object",
+        "required": [
+          "execution_id",
+          "sandbox_id",
+          "status",
+          "submitted_at"
+        ],
+        "title": "JobExecutionResponse",
+        "description": "Structured response for an execution job within a persistent sandbox session."
+      },
+      "ReadyResponse": {
+        "properties": {
+          "status": {
+            "type": "string",
+            "title": "Status",
+            "description": "Readiness status ('ready' or 'not_ready')"
+          },
+          "docker": {
+            "type": "string",
+            "title": "Docker",
+            "description": "Docker connectivity ('connected' or 'unavailable')"
+          }
+        },
+        "type": "object",
+        "required": [
+          "status",
+          "docker"
+        ],
+        "title": "ReadyResponse",
+        "description": "Readiness probe response validating underlying infrastructure dependencies."
+      },
+      "SandboxDetailResponse": {
+        "properties": {
+          "sandbox_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Sandbox Id",
+            "description": "Unique application UUID for the sandbox"
+          },
+          "status": {
+            "$ref": "#/components/schemas/SandboxStatus",
+            "description": "Current lifecycle state"
+          },
+          "runtime": {
+            "type": "string",
+            "title": "Runtime",
+            "description": "Configured runtime identifier"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At",
+            "description": "UTC creation timestamp"
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Expires At",
+            "description": "UTC TTL expiration timestamp"
+          },
+          "destroyed_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Destroyed At",
+            "description": "Destruction timestamp if destroyed"
+          },
+          "resource_config": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Resource Config",
+            "description": "Hardware and security limits assigned to this sandbox"
+          },
+          "executions_count": {
+            "type": "integer",
+            "title": "Executions Count",
+            "description": "Total execution jobs submitted",
+            "default": 0
+          }
+        },
+        "type": "object",
+        "required": [
+          "sandbox_id",
+          "status",
+          "runtime",
+          "created_at",
+          "expires_at"
+        ],
+        "title": "SandboxDetailResponse",
+        "description": "Detailed sandbox information including resource allocation and execution count."
+      },
+      "SandboxResponse": {
+        "properties": {
+          "sandbox_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Sandbox Id",
+            "description": "Unique application UUID for the sandbox"
+          },
+          "status": {
+            "$ref": "#/components/schemas/SandboxStatus",
+            "description": "Current lifecycle state"
+          },
+          "runtime": {
+            "type": "string",
+            "title": "Runtime",
+            "description": "Configured runtime identifier"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At",
+            "description": "UTC creation timestamp"
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Expires At",
+            "description": "UTC TTL expiration timestamp"
+          },
+          "destroyed_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Destroyed At",
+            "description": "Destruction timestamp if destroyed"
+          }
+        },
+        "type": "object",
+        "required": [
+          "sandbox_id",
+          "status",
+          "runtime",
+          "created_at",
+          "expires_at"
+        ],
+        "title": "SandboxResponse",
+        "description": "Summary of sandbox session lifecycle status."
+      },
+      "SandboxStatus": {
+        "type": "string",
+        "enum": [
+          "creating",
+          "running",
+          "executing",
+          "completed",
+          "failed",
+          "timed_out",
+          "expired",
+          "destroying",
+          "destroyed"
+        ],
+        "title": "SandboxStatus",
+        "description": "Explicit lifecycle states for a sandbox session."
+      },
+      "ValidationError": {
+        "properties": {
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "type": "array",
+            "title": "Location"
+          },
+          "msg": {
+            "type": "string",
+            "title": "Message"
+          },
+          "type": {
+            "type": "string",
+            "title": "Error Type"
+          },
+          "input": {
+            "title": "Input"
+          },
+          "ctx": {
+            "type": "object",
+            "title": "Context"
+          }
+        },
+        "type": "object",
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError"
+      },
+      "WriteFileRequest": {
+        "properties": {
+          "path": {
+            "type": "string",
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Path",
+            "description": "Workspace-relative path"
+          },
+          "content": {
+            "type": "string",
+            "maxLength": 73400320,
+            "title": "Content",
+            "description": "File content (plain text or base64)"
+          },
+          "encoding": {
+            "type": "string",
+            "title": "Encoding",
+            "description": "Content encoding format ('utf-8' or 'base64')",
+            "default": "utf-8"
+          }
+        },
+        "type": "object",
+        "required": [
+          "path",
+          "content"
+        ],
+        "title": "WriteFileRequest",
+        "description": "Payload for creating or overwriting a file in the workspace."
+      }
+    }
+  }
+}

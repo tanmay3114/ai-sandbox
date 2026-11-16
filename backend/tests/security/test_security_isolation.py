@@ -57,14 +57,25 @@ def test_docker_host_config_security_attributes(
         assert hc["PidsLimit"] == fast_settings.PIDS_LIMIT, "PID limit must match settings"
         assert hc["Memory"] == 134217728, "Memory limit must match 128m in test settings"
         assert hc["NanoCpus"] == 500_000_000, "NanoCpus must be 0.5 core"
+        expected_fsize = min(
+            fast_settings.MAX_FILE_SIZE_BYTES,
+            fast_settings.MAX_WORKSPACE_SIZE_BYTES,
+        )
+        assert hc.get("Ulimits") == [
+            {"Name": "fsize", "Soft": expected_fsize, "Hard": expected_fsize}
+        ], "Kernel RLIMIT_FSIZE ulimit must match workspace file storage ceiling"
 
         # 10. Labels
-        assert cfg["Labels"]["project"] == "ai-sandbox"
-        assert cfg["Labels"]["managed-by"] == "ai-sandbox-platform"
+        assert cfg["Labels"]["project"] == fast_settings.PROJECT_LABEL
+        assert cfg["Labels"]["managed-by"] == fast_settings.MANAGED_BY_LABEL
         assert cfg["Labels"]["sandbox_id"] == "sec-audit-test"
 
     finally:
-        cleanup_container_safely(container, sandbox_id="sec-audit-test")
+        cleanup_container_safely(
+            container,
+            sandbox_id="sec-audit-test",
+            config=fast_settings,
+        )
 
 
 def test_network_isolation_runtime(engine: EphemeralSandboxEngine):

@@ -26,6 +26,9 @@ htmlcov/
 # Logs
 *.log
 
+# Sandbox workspaces
+.sandboxes/
+
 # macOS
 .DS_Store
 

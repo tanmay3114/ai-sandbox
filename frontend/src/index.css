@@ -54,3 +54,17 @@ body {
 ::-webkit-scrollbar-thumb:hover {
   background: var(--color-text-muted);
 }
+
+/* Mobile responsive adjustments */
+@media (max-width: 768px) {
+  .app-layout-container {
+    flex-direction: column !important;
+  }
+  .app-sidebar {
+    width: 100% !important;
+    min-height: auto !important;
+  }
+  .workspace-split-container {
+    grid-template-columns: 1fr !important;
+  }
+}

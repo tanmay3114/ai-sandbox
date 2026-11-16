@@ -7,7 +7,7 @@ interface TTLRemainingProps {
 }
 
 export function TTLRemaining({ expiresAt, status }: TTLRemainingProps) {
-  const [now, setNow] = useState<number>(Date.now());
+  const [now, setNow] = useState<number>(() => Date.now());
 
   useEffect(() => {
     const timer = setInterval(() => {
