@@ -114,13 +114,13 @@ async def concurrency_limit_handler(
     request: Request,
     exc: ConcurrencyLimitError,
 ) -> JSONResponse:
-    """Handle platform execution concurrency saturation."""
+    """Handle platform execution capacity exhaustion."""
     logger.warning(f"Concurrency limit reached on {request.url.path}: {exc}")
     return JSONResponse(
-        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+        status_code=status.HTTP_429_TOO_MANY_REQUESTS,
         content={
             "error": "ConcurrencyLimitError",
-            "message": "Maximum concurrent sandbox executions reached. Please retry shortly.",
+            "message": exc.message,
             "details": exc.details,
         },
     )
@@ -270,7 +270,7 @@ async def agent_max_iterations_handler(
     """Handle agent iteration ceiling exhaustion."""
     logger.warning(f"Agent max iterations reached on {request.url.path}: {exc.message}")
     return JSONResponse(
-        status_code=status.HTTP_400_BAD_REQUEST,
+        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
         content={
             "error": "AgentMaxIterationsError",
             "message": exc.message,
@@ -394,6 +394,7 @@ async def validation_exception_handler(
         errors.append(
             {
                 "field": loc,
+                "message": err.get("msg", "Invalid value"),
                 "issue": err.get("msg", "Invalid value"),
                 "type": err.get("type", "value_error"),
             }
@@ -403,7 +404,10 @@ async def validation_exception_handler(
         content={
             "error": "ValidationError",
             "message": "Request payload failed schema validation",
-            "details": {"validation_errors": errors},
+            "details": {
+                "errors": errors,
+                "validation_errors": errors,
+            },
         },
     )
 

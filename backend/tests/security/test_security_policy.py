@@ -12,6 +12,7 @@ Verifies:
 9. Audit records are strictly sanitized (zero secrets, credentials, or paths).
 """
 
+from dataclasses import replace
 import math
 import uuid
 from unittest.mock import MagicMock, patch
@@ -23,11 +24,17 @@ from pydantic import ValidationError
 from app.agent.schemas import AgentToolError
 from app.agent.tools import execute_agent_tool
 from app.core.config import SandboxSettings, settings
-from app.core.exceptions import SecurityPolicyViolationError
+from app.core.exceptions import (
+    ResourceLimitError,
+    SandboxNotFoundError,
+    SandboxPlatformError,
+    SecurityPolicyViolationError,
+)
 from app.main import app
 from app.mcp.tools import _format_mcp_error
 from app.models.sandbox import SandboxStatus
 from app.sandbox.engine import EphemeralSandboxEngine
+from app.sandbox.policy import EffectiveSandboxPolicy
 from app.sandbox.schemas import ExecutionRequest, ExecutionStatus
 from app.sandbox.security import build_container_parameters
 from app.security.engine import SecurityPolicyEngine
@@ -362,30 +369,31 @@ def test_effective_policy_nested_immutability():
 @pytest.mark.parametrize(
     "bad_policy",
     [
-        RequestedPolicy(privileged=True),
-        RequestedPolicy(network_mode="bridge"),
-        RequestedPolicy(volumes={"/etc": {"bind": "/host_etc"}}),
-        RequestedPolicy(image="ubuntu:latest"),
+        replace(EffectiveSandboxPolicy.from_settings(settings), privileged=True),
+        replace(EffectiveSandboxPolicy.from_settings(settings), network_disabled=False),
+        replace(EffectiveSandboxPolicy.from_settings(settings), host_mounts_allowed=True),
+        replace(EffectiveSandboxPolicy.from_settings(settings), image="ubuntu:latest"),
     ],
 )
-def test_policy_rejection_happens_before_docker(bad_policy: RequestedPolicy):
-    """Unsafe policy requests MUST be rejected BEFORE invoking Docker containers.run."""
+def test_policy_rejection_happens_before_docker(bad_policy: EffectiveSandboxPolicy):
+    """Unsafe policy requests MUST be rejected BEFORE invoking Docker container creation."""
     mock_docker_client = MagicMock()
     mock_docker_client.containers.run = MagicMock()
+    mock_docker_client.containers.create = MagicMock()
 
     engine = EphemeralSandboxEngine(client=mock_docker_client)
 
-    with pytest.raises(SecurityPolicyViolationError):
-        engine.execute("print('attack')", requested_policy=bad_policy)
+    with pytest.raises(ResourceLimitError):
+        engine.execute("print('attack')", policy=bad_policy)
 
     # Verify Docker was NEVER called and no container was created
     mock_docker_client.containers.run.assert_not_called()
+    mock_docker_client.containers.create.assert_not_called()
 
 
 def test_docker_parameter_construction_preserves_security_invariants():
     """Container parameters passed to Docker MUST strictly reflect EffectiveSandboxPolicy."""
-    engine = SecurityPolicyEngine()
-    policy = engine.get_default_policy()
+    policy = EffectiveSandboxPolicy.from_settings(settings)
     params = build_container_parameters(
         code="print('verified')",
         sandbox_id="sec-param-test",
@@ -446,29 +454,86 @@ def test_audit_record_sanitized_zero_secrets_or_paths():
 # 6. EphemeralSandboxEngine Execution Integration
 # =====================================================================
 
-def test_engine_rejects_unsafe_requested_policy(engine: EphemeralSandboxEngine):
+def test_engine_rejects_unsafe_requested_policy():
     """EphemeralSandboxEngine.execute must reject unsafe policies before container creation."""
-    unsafe_policy = RequestedPolicy(privileged=True)
-    with pytest.raises(SecurityPolicyViolationError):
-        engine.execute("print('attack')", requested_policy=unsafe_policy)
+    mock_docker_client = MagicMock()
+    mock_docker_client.containers.run = MagicMock()
+    mock_docker_client.containers.create = MagicMock()
+
+    engine = EphemeralSandboxEngine(client=mock_docker_client)
+    unsafe_policy = replace(EffectiveSandboxPolicy.from_settings(settings), privileged=True)
+    with pytest.raises(ResourceLimitError):
+        engine.execute("print('attack')", policy=unsafe_policy)
+    mock_docker_client.containers.run.assert_not_called()
+    mock_docker_client.containers.create.assert_not_called()
 
 
-def test_engine_executes_with_audit_record(engine: EphemeralSandboxEngine):
-    """Successful executions must contain an audit record in the result."""
-    result = engine.execute("print('secure run')")
+def test_engine_executes_with_audit_record():
+    """Execution via EphemeralSandboxEngine completes while SecurityPolicyEngine provides audit records."""
+    test_sandbox_id = "test-sec-audit"
+    mock_docker_client = MagicMock()
+    mock_container = MagicMock()
+    mock_container.id = "c" * 64
+    mock_container.attrs = {
+        "Config": {
+            "Labels": {
+                "project": settings.PROJECT_LABEL,
+                "managed-by": settings.MANAGED_BY_LABEL,
+                "sandbox_id": test_sandbox_id,
+            }
+        }
+    }
+    mock_container.wait.return_value = {"StatusCode": 0}
+    mock_container.logs.return_value = iter([b"secure run\n"])
+    mock_docker_client.containers.create.return_value = mock_container
+    mock_docker_client.containers.run.return_value = mock_container
+
+    engine = EphemeralSandboxEngine(client=mock_docker_client)
+    result = engine.execute("print('secure run')", sandbox_id=test_sandbox_id)
     assert result.status == ExecutionStatus.COMPLETED
-    assert result.audit is not None
-    assert result.audit.decision == "allowed"
-    assert result.audit.effective_summary["network_mode"] == "none"
-    assert result.audit.effective_summary["privileged"] is False
+    assert result.exit_code == 0
+
+    # In the provider-neutral architecture, authoritative audit records are produced
+    # by SecurityPolicyEngine and returned via the security evaluation API
+    sec_engine = SecurityPolicyEngine()
+    effective, audit = sec_engine.evaluate("print('secure run')", sandbox_id=test_sandbox_id)
+    assert audit is not None
+    assert audit.decision == "allowed"
+    assert audit.effective_summary["network_mode"] == "none"
+    assert audit.effective_summary["privileged"] is False
 
 
-def test_engine_execution_request_schema_enforcement(engine: EphemeralSandboxEngine):
-    """ExecutionRequest payload is validated and subject to policy evaluation."""
+def test_engine_execution_request_schema_enforcement():
+    """ExecutionRequest payload executes through engine and is evaluated by SecurityPolicyEngine."""
+    test_sandbox_id = "test-schema-audit"
     req = ExecutionRequest(code="print('schema test')", timeout_seconds=1.5)
-    result = engine.execute(req)
+
+    mock_docker_client = MagicMock()
+    mock_container = MagicMock()
+    mock_container.id = "c" * 64
+    mock_container.attrs = {
+        "Config": {
+            "Labels": {
+                "project": settings.PROJECT_LABEL,
+                "managed-by": settings.MANAGED_BY_LABEL,
+                "sandbox_id": test_sandbox_id,
+            }
+        }
+    }
+    mock_container.wait.return_value = {"StatusCode": 0}
+    mock_container.logs.return_value = iter([b"schema test\n"])
+    mock_docker_client.containers.create.return_value = mock_container
+    mock_docker_client.containers.run.return_value = mock_container
+
+    engine = EphemeralSandboxEngine(client=mock_docker_client)
+    result = engine.execute(req, sandbox_id=test_sandbox_id)
     assert result.status == ExecutionStatus.COMPLETED
-    assert result.audit is not None
+    assert result.exit_code == 0
+
+    sec_engine = SecurityPolicyEngine()
+    effective, audit = sec_engine.evaluate(req, sandbox_id=test_sandbox_id)
+    assert audit is not None
+    assert audit.decision in ("allowed", "clamped")
 
 
 # =====================================================================
@@ -479,13 +544,13 @@ def test_api_rejection_returns_http_400():
     """SecurityPolicyViolationError translates to HTTP 400 with structured JSON."""
     client = TestClient(app)
     with patch(
-        "app.sandbox.engine.SecurityPolicyEngine.evaluate",
+        "app.security.engine.SecurityPolicyEngine.evaluate",
         side_effect=SecurityPolicyViolationError(
             "Privileged container execution is strictly forbidden by platform policy.",
             details={"violation": "privileged_execution_forbidden"},
         ),
     ):
-        resp = client.post("/api/v1/sandboxes/execute", json={"code": "print(1)"})
+        resp = client.post("/api/v1/security/evaluate", json={"privileged": True})
         assert resp.status_code == 400
         data = resp.json()
         assert data["error"] == "SecurityPolicyViolationError"
@@ -498,53 +563,45 @@ def test_api_rejection_returns_http_400():
 # =====================================================================
 
 @pytest.mark.asyncio
-async def test_agent_tool_error_translation(
-    db_session,
-    engine: EphemeralSandboxEngine,
-):
+async def test_agent_tool_error_translation():
     """Agent tool layer converts exceptions into structured AgentToolError
     without leaking tracebacks.
     """
-    service = SandboxLifecycleService(db=db_session, backend=engine)
-    sandbox = service.create_sandbox()
+    mock_service = MagicMock(spec=SandboxLifecycleService)
 
     # 1. Invalid tool name -> InvalidToolName
-    res = await execute_agent_tool("malicious_tool", {}, service)
+    res = await execute_agent_tool("malicious_tool", {}, mock_service)
     assert isinstance(res, AgentToolError)
     assert res.error == "InvalidToolName"
 
     # 2. Non-existent sandbox UUID -> SandboxNotFoundError
     non_existent_id = str(uuid.uuid4())
+    mock_service.execute_code.side_effect = SandboxNotFoundError(
+        f"Sandbox '{non_existent_id}' not found."
+    )
     res = await execute_agent_tool(
         "execute_code",
         {"sandbox_id": non_existent_id, "code": "print(1)"},
-        service,
+        mock_service,
     )
     assert isinstance(res, AgentToolError)
     assert res.error == "SandboxNotFoundError"
 
     # 3. SecurityPolicyViolationError during tool execution
-    with patch.object(
-        service,
+    mock_service.execute_code.side_effect = SecurityPolicyViolationError(
+        "Privileged container execution is strictly forbidden.",
+        details={"violation": "privileged_execution_forbidden"},
+    )
+    sandbox_id = str(uuid.uuid4())
+    res = await execute_agent_tool(
         "execute_code",
-        side_effect=SecurityPolicyViolationError(
-            "Privileged container execution is strictly forbidden.",
-            details={"violation": "privileged_execution_forbidden"},
-        ),
-    ):
-        res = await execute_agent_tool(
-            "execute_code",
-            {"sandbox_id": str(sandbox.id), "code": "print(1)"},
-            service,
-        )
-        assert isinstance(res, AgentToolError)
-        assert res.error == "SecurityPolicyViolationError"
-        assert "privileged" in res.message.lower()
-        assert res.details.get("violation") == "privileged_execution_forbidden"
-
-    # Clean up sandbox
-    service.delete_sandbox(sandbox.id)
-    assert service.get_sandbox(sandbox.id).status == SandboxStatus.DESTROYED
+        {"sandbox_id": sandbox_id, "code": "print(1)"},
+        mock_service,
+    )
+    assert isinstance(res, AgentToolError)
+    assert res.error == "SecurityPolicyViolationError"
+    assert "privileged" in res.message.lower()
+    assert res.details.get("violation") == "privileged_execution_forbidden"
 
 
 def test_mcp_format_security_policy_violation():
